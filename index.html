@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>日地月 3D 實驗室 v12｜飛進小人的眼睛</title>
+<meta name="description" content="用真實 NASA 月球與地球，從太空、從台灣地面、從望遠鏡三個視角同時看月相、月亮東升西落與每天晚約 50 分鐘。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🌙%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css?v=12.0">
+</head>
+<body class="lv-e">
+
+<canvas id="gl"></canvas>
+
+<header id="topbar">
+  <div class="brand">
+    <span class="logo">🌙</span>
+    <span class="title">日地月 3D 實驗室</span>
+    <span class="ver">v12</span>
+  </div>
+  <div class="top-actions">
+    <div class="seg" id="level-seg" role="tablist" aria-label="程度">
+      <button type="button" data-lv="e" class="on">國小</button>
+      <button type="button" data-lv="j">國中</button>
+    </div>
+    <button type="button" class="tbtn" id="btn-help">❓ 怎麼玩</button>
+    <button type="button" class="tbtn gold" id="btn-fs">⛶ 全螢幕</button>
+  </div>
+</header>
+
+<main id="stage">
+  <section class="slot" id="slot-main">
+    <div class="slot-head"><span class="slot-title"></span><span class="slot-sub"></span></div>
+    <div class="labels"></div>
+    <div class="view-tools"></div>
+    <div class="view-actions"></div>
+    <div class="fly-fade"></div>
+  </section>
+  <aside id="side">
+    <section class="slot mini" id="slot-a">
+      <div class="slot-head"><span class="slot-title"></span><span class="slot-sub">點一下放大</span></div>
+      <div class="labels"></div>
+    </section>
+    <section class="slot mini" id="slot-b">
+      <div class="slot-head"><span class="slot-title"></span><span class="slot-sub">點一下放大</span></div>
+      <div class="labels"></div>
+    </section>
+    <div id="info-card"></div>
+  </aside>
+</main>
+
+<footer id="dock">
+  <div class="dock-row">
+    <div class="ctl ctl-day">
+      <div class="ctl-label"><span>📅 農曆日期 <small>（月亮繞地球）</small></span><b id="lbl-day">初八</b></div>
+      <div class="ctl-line">
+        <button type="button" class="step" id="day-prev" aria-label="前一天">◀</button>
+        <div class="range-wrap">
+          <input type="range" id="rng-day" min="1" max="30" step="1" value="8" aria-label="農曆日期">
+          <div class="ticks" id="day-ticks"></div>
+        </div>
+        <button type="button" class="step" id="day-next" aria-label="後一天">▶</button>
+      </div>
+    </div>
+    <div class="ctl ctl-time">
+      <div class="ctl-label"><span>🕒 一天中的時間 <small>（地球自轉）</small></span><b id="lbl-time">18:00</b></div>
+      <div class="ctl-line">
+        <button type="button" class="step" id="time-prev" aria-label="早一小時">◀</button>
+        <div class="range-wrap"><input type="range" id="rng-time" min="0" max="24" step="0.0833333" value="18" aria-label="時間"><div class="time-bg"></div></div>
+        <button type="button" class="step" id="time-next" aria-label="晚一小時">▶</button>
+      </div>
+    </div>
+  </div>
+  <div class="dock-row dock-row2">
+    <div class="plays">
+      <button type="button" class="play" data-play="time"><span class="pi">▶</span> 看這一天<br><small>日月東升西落</small></button>
+      <button type="button" class="play" data-play="day"><span class="pi">▶</span> 每天同一時間<br><small>看月亮怎麼變</small></button>
+      <button type="button" class="play" data-play="sync"><span class="pi">▶</span> 宇宙一起跑<br><small>時間連續過日子</small></button>
+      <label class="speed"><span>速度</span><input type="range" id="rng-speed" min="0.25" max="4" step="0.25" value="1"><b id="lbl-speed">1×</b></label>
+    </div>
+    <div class="presets">
+      <button type="button" class="pre" data-d="1" data-t="12">🌑 初一 12:00</button>
+      <button type="button" class="pre" data-d="8" data-t="18">🌓 初八 18:00</button>
+      <button type="button" class="pre" data-d="15" data-t="18">🌕 十五 18:00</button>
+      <button type="button" class="pre" data-d="15" data-t="24">🌕 十五 24:00</button>
+      <button type="button" class="pre" data-d="23" data-t="6">🌗 廿三 06:00</button>
+    </div>
+  </div>
+</footer>
+
+<div id="loading">
+  <div class="ld-card">
+    <div class="ld-moon"></div>
+    <div class="ld-text" id="ld-text">正在載入 NASA 真實月球與地球…</div>
+    <div class="ld-bar"><i id="ld-bar"></i></div>
+  </div>
+</div>
+
+<div id="help" class="overlay" aria-hidden="true">
+  <div class="help-card">
+    <h2>🌙 怎麼玩？</h2>
+    <ol>
+      <li><b>大畫面</b>是現在的主角；右邊兩個小畫面是<b>同一個時刻</b>的其他視角，點一下就換成大畫面。</li>
+      <li><b>🌍 太空看</b>：用手指轉動、捏合縮放。太陽光從右邊來，月亮被照亮的一半永遠朝向太陽。</li>
+      <li><b>🧍 站在台灣看</b>：用手指左右滑動轉身、上下看天空；按「面向南」就是課本的觀測姿勢（左東右西）。</li>
+      <li><b>🔭 望遠鏡</b>：放大看真實月球表面，亮的那一邊就是陽光照來的方向。</li>
+      <li>拉動下方的<b>農曆日期</b>（月亮繞地球）和<b>時間</b>（地球自轉），三個畫面會一起變。</li>
+      <li>在太空畫面按 <b>🚀 飛進小人的眼睛</b>，鏡頭會從太空一路飛到台灣小人身上，再抬頭看天空！</li>
+    </ol>
+    <p class="note">📝 這是「理想模型」：為了好懂，地軸和月球軌道都畫成不傾斜，地球和月亮的距離也縮短了；天空中的月亮也畫得比真實大（約 12 倍），才看得清楚月相。月亮升起的方位、時間和真實天空會有一點差異。</p>
+    <button type="button" class="big-ok" id="help-ok">我知道了，開始探索！</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="js/astronomy.browser.min.js" defer></script>
+<script type="module" src="js/app.js?v=12.0"></script>
+<noscript><div style="padding:30px;color:#fff;font-size:20px">請開啟瀏覽器的 JavaScript 才能使用。</div></noscript>
+</body>
+</html>
