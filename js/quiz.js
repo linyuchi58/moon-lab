@@ -2,7 +2,7 @@
 // 🏆 日地月 3D 實驗室 v12 ── 挑戰測驗＋教師後台（第二階段）
 // ・題目每次隨機產生、選項打亂；要動手操作 3D 宇宙、先預測再觀察
 // ・兩段式題目（答案＋理由）診斷迷思；教師後台依「概念」與「迷思」統計
-// ・後端：萬用遊戲端 Code.gs v3.3（GET 加 &t=、POST 用 text/plain；網址固定在程式碼）
+// ・後端：萬用遊戲端 Code.gs v3.4（GET 加 &t=、POST 用 text/plain；網址固定在程式碼）
 // =====================================================================
 const GAS_URL = "https://script.google.com/macros/s/AKfycbyGWBQptYfpDfLFLspn9EtX8AkO81pEWEVBOW5VyJ2WoJN21uGy9SLXgx-DR2-nhEA/exec";
 function getGasUrl() { return GAS_URL; }
@@ -662,10 +662,11 @@ async function runDiag() {
   const rows = [];
   const t0 = performance.now();
   try { const r = await fetch(`${getGasUrl()}?t=${Date.now()}`, { method: 'GET', credentials: 'omit', redirect: 'follow' }); const d = await r.json(); rows.push(['☁️ 雲端後台', `✅ 正常（${esc(d.version || d.status)}，${Math.round(performance.now() - t0)} 毫秒）`]);
-    if (!/v3\.3/.test(String(d.version || ''))) rows.push(['🔐 後台版本', '⚠️ 建議更新成 Code.gs v3.3（保護管理密碼、清空成績要驗證）']); else rows.push(['🔐 後台版本', '✅ 已是 v3.3']);
+    const vm = String(d.version || '').match(/v(\d+)\.(\d+)/), vn = vm ? (+vm[1]) * 100 + (+vm[2]) : 0;
+    rows.push(['🔐 後台版本', vn >= 304 ? `✅ 已是 ${esc(vm[0])}（最新）` : `⚠️ 目前是 ${esc(vm ? vm[0] : '舊版')}，請更新成日地月專用 Code.gs v3.4（保護管理密碼、修改與清空成績要驗證）`]);
   } catch (e) { rows.push(['☁️ 雲端後台', '❌ 連不上（請檢查網路，或確認 GAS 已部署為「任何人」可存取）']); }
   try { const d = await gasGet({ action: 'getRoomConfig', roomCode: adminSession.roomCode }); const leak = d && d.config && ('roomPin' in d.config);
-    rows.push(['📥 讀取這組代碼', d && d.status === 'success' ? '✅ 正常' : '⚠️ ' + esc(d && d.status)]); rows.push(['🛡 管理密碼保護', leak ? '❌ 學生端讀得到管理密碼！請更新後台 v3.3' : '✅ 學生端讀不到管理密碼']);
+    rows.push(['📥 讀取這組代碼', d && d.status === 'success' ? '✅ 正常' : '⚠️ ' + esc(d && d.status)]); rows.push(['🛡 管理密碼保護', leak ? '❌ 學生端讀得到管理密碼！請更新後台 v3.4' : '✅ 學生端讀不到管理密碼']);
   } catch (e) { rows.push(['📥 讀取這組代碼', '❌ 失敗']); }
   rows.push(['🖥 3D 顯示', QM() && QM().ready() ? '✅ 正常' : '⏳ 載入中']);
   p.innerHTML = `<div class="adm-sec"><h3>🩺 連線檢查</h3><table class="qz-table"><tbody>${rows.map(r => `<tr><td style="text-align:left;width:160px">${r[0]}</td><td style="text-align:left">${r[1]}</td></tr>`).join('')}</tbody></table>
