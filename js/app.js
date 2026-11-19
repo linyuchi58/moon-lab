@@ -567,6 +567,8 @@ function putLabel(slot, key, text, cls, x, y) {
   if (!el) { el = document.createElement('div'); el.className = 'lb'; slot.querySelector('.labels').appendChild(el); P.map.set(key, el); }
   if (el._t !== text) { el.textContent = text; el._t = text; }
   const c = 'lb ' + cls; if (el._c !== c) { el.className = c; el._c = c; }
+  if (el._t2 !== text || el._c2 !== c) { el._w = 0; el._t2 = text; el._c2 = c; }
+  el._x = x; el._y = y;
   el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.display = '';
   P.used.add(key);
 }
@@ -577,7 +579,23 @@ function labelAt(slot, key, text, cls, world, cam, w, h, dy = 0, clampIn = false
   else if (p.x < -60 || p.x > w + 60 || p.y < -30 || p.y > h + 30) return false;
   putLabel(slot, key, text, cls, p.x, p.y + dy); return true;
 }
-function endLabels(slot) { const P = pool(slot); for (const [k, el] of P.map) if (!P.used.has(k)) el.style.display = 'none'; P.used.clear(); }
+const LB_HIGH = ['moon', 'altread', 'moonedge', 'sun', 'ring'];
+function lbRect(el) {
+  if (!el._w) { el._w = el.offsetWidth; el._h = el.offsetHeight; }
+  const hud = el._c && el._c.includes('hud');
+  return { l: el._x - el._w / 2, r: el._x + el._w / 2, t: hud ? el._y : el._y - el._h / 2, b: hud ? el._y + el._h : el._y + el._h / 2 };
+}
+function resolveOverlaps(slot) {
+  const P = pool(slot), hi = [];
+  for (const k of LB_HIGH) if (P.used.has(k)) hi.push(lbRect(P.map.get(k)));
+  if (!hi.length) return;
+  for (const k of P.used) {
+    if (!/^(g\d|h\d|d\d)/.test(k)) continue;
+    const el = P.map.get(k), r = lbRect(el);
+    if (hi.some(q => r.l < q.r + 4 && r.r > q.l - 4 && r.t < q.b + 2 && r.b > q.t - 2)) { el.style.display = 'none'; P.used.delete(k); }
+  }
+}
+function endLabels(slot) { const P = pool(slot); if (slot === SLOTS.main && !slot.classList.contains('mini')) resolveOverlaps(slot); for (const [k, el] of P.map) if (!P.used.has(k)) el.style.display = 'none'; P.used.clear(); }
 
 function lunarName(D) { if (S.real && AE()) return realLunarName(D); return LUNAR[Math.min(30, Math.max(1, Math.round(D))) - 1]; }
 
@@ -616,16 +634,17 @@ function groundLabels(slot, cam, w, h, mini) {
       const ang = Math.atan2(ay, ax), arrows = ['➡', '⬈', '⬆', '⬉', '⬅', '⬋', '⬇', '⬊'];
       const arrow = arrows[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
       const k = Math.min((w / 2 - 110) / Math.max(Math.abs(ax), 1e-3), (h / 2 - 70) / Math.max(Math.abs(ay), 1e-3));
-      putLabel(slot, 'moonedge', `${arrow} 🌙 月亮在這邊`, 'hint', w / 2 + ax * k, h / 2 - ay * k);
+      putLabel(slot, 'moonedge', `${arrow} 🌙 月亮在這邊`, 'hint', w / 2 + ax * k, Math.min(h / 2 - ay * k, h - 140));
     }
   }
   if (!S.hideMoon && SC.skyMoon < 0.5) labelAt(slot, 'ring', '', 'ring', skyMoon.position, cam, w, h);
   if (!S.hideMoon) labelAt(slot, 'moon', mText, 'moon' + (mh.alt < 0 ? ' below' : ''), skyMoon.position.clone().addScaledVector(B.up, SKY_MOON_R * SC.skyMoon * 1.25), cam, w, h, -14);
   labelAt(slot, 'sun', sh.alt < 0 ? '☀️ 太陽（地平線下）' : '☀️ 太陽', 'sun' + (sh.alt < 0 ? ' below' : ''), cur.sd.clone().multiplyScalar(900).addScaledVector(B.up, 60), cam, w, h);
   if (mini) return;
-  if (mh.alt <= 0 && !S.mask.alt) putLabel(slot, 'altread', `🌙 月亮在地平線下（${dir8(mh.az)}方），現在看不到`, 'altread hud below', w / 2, h - 100);
+  const narrow = w < 560;
+  if (mh.alt <= 0 && !S.mask.alt) putLabel(slot, 'altread', narrow ? `🌙 在地平線下（${dir8(mh.az)}方）看不到` : `🌙 月亮在地平線下（${dir8(mh.az)}方），現在看不到`, 'altread hud below', w / 2, h - 100);
   if (mh.alt > 0) {
-    if (!S.mask.alt) putLabel(slot, 'altread', `🌙 月亮在${dir8(mh.az)}方・高度角 ${Math.round(mh.alt)}°${S.opt.fist ? `（約 ${(mh.alt / 10).toFixed(1)} 個拳頭）` : ''}`, 'altread hud', w / 2, h - 100);
+    if (!S.mask.alt) putLabel(slot, 'altread', narrow ? `🌙 ${dir8(mh.az)}方・高度 ${Math.round(mh.alt)}°${S.opt.fist ? `（${(mh.alt / 10).toFixed(1)} 拳）` : ''}` : `🌙 月亮在${dir8(mh.az)}方・高度角 ${Math.round(mh.alt)}°${S.opt.fist ? `（約 ${(mh.alt / 10).toFixed(1)} 個拳頭）` : ''}`, 'altread hud', w / 2, h - 100);
     if (S.opt.fist) for (let k = 0; k * 10 + 5 < mh.alt - 2; k++) labelAt(slot, 'f' + k, '✊', 'fist', fromHoriz(mh.az, k * 10 + 5, B).multiplyScalar(1000), cam, w, h);
   }
   if (S.opt.path) {
@@ -663,15 +682,20 @@ const TOOLS = {
     <div class="tool-group">
       ${chip('grid', '🧭 方位格線')}${chip('fist', '✊ 拳頭量高度')}${chip('path', '〰️ 今天的軌跡')}${chip('ghosts', '👣 每天同一時間')}${chip('trueMoonSize', '🔍 月亮真實大小')}${chip('seeThrough', '🫥 透視地面')}
     </div>`, `
+    ${narrowMain() ? `<div class="tool-group act-row compact"><button type="button" class="chip ${S.followMoon ? 'on' : ''}" id="btn-follow" title="跟著月亮">🎯</button>${hasGyro() ? `<button type="button" class="chip ${S.gyro ? 'on' : ''}" id="btn-gyro" title="舉起平板找月亮">📱</button>` : ''}<button type="button" class="chip" data-face-cycle="1" title="換一個方向">🧭 ${dir8(S.look.az)}</button><button type="button" class="chip go back" id="btn-fly-out">🛸 太空</button></div>` : `
     <div class="tool-group act-row"><button type="button" class="chip ${S.followMoon ? 'on' : ''}" id="btn-follow">🎯 跟著月亮</button><button type="button" class="chip go back" id="btn-fly-out">🛸 飛回太空</button></div>
-    ${(('DeviceOrientationEvent' in window) && matchMedia('(any-pointer: coarse)').matches) || S.gyro ? `<button type="button" class="chip ${S.gyro ? 'on' : ''}" id="btn-gyro">📱 ${S.gyro ? '停止感應' : '舉起平板找月亮'}</button>` : ''}
+    ${hasGyro() ? `<button type="button" class="chip ${S.gyro ? 'on' : ''}" id="btn-gyro">📱 ${S.gyro ? '停止感應' : '舉起平板找月亮'}</button>` : ''}
     <div class="tool-group face-group"><span class="face-lbl">面向</span>
       <button type="button" class="chip" data-face="90">東</button><button type="button" class="chip" data-face="180">南</button><button type="button" class="chip" data-face="270">西</button><button type="button" class="chip" data-face="0">北</button>
-    </div>`],
+    </div>`}`],
   scope: () => [`
     <div class="tool-group">${chip('maria', '🗺 月海標示（古人看成玉兔）')}</div>`, `
     <div class="tool-group"><button type="button" class="chip" data-zoom="-1">－ 縮小</button><button type="button" class="chip" data-zoom="1">＋ 放大</button></div>`]
 };
+function hasGyro() { return (('DeviceOrientationEvent' in window) && matchMedia('(any-pointer: coarse)').matches) || S.gyro; }
+function narrowMain() { return SLOTS.main.clientWidth > 0 && SLOTS.main.clientWidth < 600; }
+let lastNarrow = null;
+function checkNarrow() { const n = narrowMain(); if (n !== lastNarrow) { lastNarrow = n; if (S.views.main === 'ground') renderTools(); } }
 function chip(k, text) { return `<button type="button" class="chip ${S.opt[k] ? 'on' : ''}" data-opt="${k}">${text}</button>`; }
 function renderTools() {
   const [bottom, top] = TOOLS[S.views.main]();
@@ -696,6 +720,7 @@ box.addEventListener('click', ev => {
     if (k === 'lockPerson') lastObs = obsAngle(S.T);
     syncDuplicateChips(k); updateScene(); return;
   }
+  if (b.dataset.faceCycle) { S.followMoon = false; const nxt = (Math.round(S.look.az / 90) * 90 + 90) % 360; animateLook(nxt, S.look.alt); b.textContent = '🧭 ' + dir8(nxt); const fb = document.getElementById('btn-follow'); if (fb) fb.classList.remove('on'); return; }
   if (b.dataset.face) { S.followMoon = false; animateLook(+b.dataset.face, 28); renderTools(); return; }
   if (b.dataset.cam) { setSpaceCam(b.dataset.cam); return; }
   if (b.dataset.zoom) { S.scopeZoom = THREE.MathUtils.clamp(S.scopeZoom * (b.dataset.zoom > 0 ? 1.5 : 1 / 1.5), 0.6, 5); S.dirty = true; return; }
@@ -1183,8 +1208,9 @@ fsBtn.addEventListener('click', () => {
   if (!req) { toast('這台裝置不支援全螢幕；iPhone 可用「分享 → 加入主畫面」'); return; }
   try { const r = req.call(el); if (r && r.catch) r.catch(() => toast('無法進入全螢幕')); } catch (e) {}
 });
+if (innerWidth < 700) fsBtn.textContent = '⛶';
 ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, () => {
-  fsBtn.textContent = (document.fullscreenElement || document.webkitFullscreenElement) ? '✕ 離開全螢幕' : '⛶ 全螢幕';
+  fsBtn.textContent = (document.fullscreenElement || document.webkitFullscreenElement) ? (innerWidth < 700 ? '✕ 離開' : '✕ 離開全螢幕') : (innerWidth < 700 ? '⛶' : '⛶ 全螢幕');
   fsBtn.classList.toggle('gold', !(document.fullscreenElement || document.webkitFullscreenElement));
 }));
 let toastTimer = 0;
@@ -1203,6 +1229,8 @@ function resize() {
   S.dirty = true;
 }
 window.addEventListener('resize', resize);
+window.addEventListener('resize', () => setTimeout(checkNarrow, 60));
+setTimeout(checkNarrow, 300);
 window.addEventListener('orientationchange', () => setTimeout(resize, 250));
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
@@ -1267,3 +1295,23 @@ window.__moon = { S, setReal, setTrueScale, setTrueMoonSize, toggleGyro, stopGyr
   setQuizState, phaseOf, elong, lunarName, fmtT, dir8, toast, play: m => { const b = document.querySelector(`.play[data-play="${m}"]`); if (b && S.play !== m) { b.disabled = false; b.click(); } }, stopPlay,
   onChange: f => changeHooks.push(f), setSpaceCam, ready: () => loaded };
 window.dispatchEvent(new Event('moon-ready'));
+
+// ---------------- 自動更新：發現新版就重新載入（避免平板一直用舊快取） ----------------
+const APP_VER = '12.4';
+(function () { const v = document.querySelector('.brand .ver'); if (v) v.textContent = 'v' + APP_VER; })();
+async function checkUpdate() {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.v && j.v !== APP_VER) {
+      const key = 'MOON_UPD_' + j.v;
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+      if (document.body.classList.contains('quiz') || document.querySelector('.qz-ov.show, #result-overlay.show, #admin-overlay.show')) { sessionStorage.removeItem(key); return; }
+      const u = new URL(location.href); u.searchParams.set('v', j.v); location.replace(u.toString());
+    }
+  } catch (e) {}
+}
+setTimeout(checkUpdate, 1500);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });

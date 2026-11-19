@@ -306,3 +306,23 @@ body.quiz .city-sel, body.quiz .real-only { display: none !important; }
   .top-actions > * { flex-shrink: 0; }
   .city-sel { max-width: 92px; }
 }
+
+/* v12.4 手機：地面按鈕精簡一列、全螢幕鍵固定在右邊 */
+.act-row.compact { gap: 4px !important; }
+.act-row.compact .chip { min-height: 34px; padding: 4px 9px; font-size: 14px; }
+@media (max-width: 640px) {
+  #btn-fs { position: sticky; right: 0; z-index: 2; box-shadow: -8px 0 10px rgba(5,8,20,.9); }
+  .top-actions { padding-right: 0; }
+}
+/* v12.4：格線欄位不被內容撐寬；手機直立主畫面加大 */
+@media (orientation: portrait) { #stage { grid-template-columns: minmax(0, 1fr); } }
+#stage > *, #side > *, .slot { min-width: 0; }
+#btn-fs { background: #1a1405; }
+@media (orientation: portrait) and (max-width: 600px) {
+  #side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: clamp(92px, 13vh, 120px) auto; }
+  #info-card { max-height: 19vh; padding: 6px 10px; font-size: 13px; }
+  #info-card .ic-tabs button { min-height: 32px; padding: 3px 6px; }
+  .lb.altread.hud { white-space: nowrap; font-size: 13px; padding: 3px 10px; }
+}
+body { grid-template-columns: minmax(0, 1fr); }
+@media (orientation: portrait) and (max-width: 600px) { .play { white-space: nowrap; font-size: 12px; padding: 4px 6px; } }
