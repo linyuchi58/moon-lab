@@ -4,11 +4,11 @@
   --dock-h: auto; --top-h: 54px; --radius: 16px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+html, body { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--bg); color: var(--text);
   font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; touch-action: manipulation; }
-body { display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) auto; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+body { display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) auto; height: auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 button { font-family: inherit; cursor: pointer; color: inherit; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
-#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; z-index: 0; pointer-events: none; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; pointer-events: none; }
 
 /* ---------- top bar ---------- */
 #topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px;
@@ -224,3 +224,36 @@ input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 
   .view-actions { flex-direction: row-reverse; flex-wrap: wrap; align-items: flex-start; max-width: 70%; }
   .lb.altread.hud { font-size: 13px; padding: 4px 10px; white-space: normal; max-width: 92%; text-align: center; }
 }
+
+/* ---- v12.1 平板優化 ---- */
+.face-group { align-items: center; background: rgba(4,8,20,.7); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 3px !important; }
+.face-group .face-lbl { font-size: 13px; font-weight: 800; color: var(--dim); padding: 0 4px 0 8px; }
+.face-group .chip { min-width: 40px; min-height: 36px; padding: 4px 10px; border-radius: 999px; }
+.act-row { flex-wrap: nowrap !important; }
+.view-actions { gap: 6px; }
+.presets { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
+.presets::-webkit-scrollbar { display: none; }
+.pre { flex-shrink: 0; }
+#slot-main { container-type: size; container-name: mainv; }
+@container mainv (max-height: 460px) {
+  .slot-sub { display: none; }
+  .view-actions { top: 44px; }
+  .chip { min-height: 34px; padding: 4px 10px; font-size: 13px; }
+  .chip.go { font-size: 14px; padding: 6px 12px; }
+}
+@container mainv (max-width: 640px) {
+  #slot-main[data-view="space"] .view-actions .tool-group { display: none; }
+}
+/* 平板直立：小畫面與資訊卡排成一列，主畫面更大 */
+@media (orientation: portrait) and (min-width: 601px) {
+  #side { grid-template-columns: 1fr 1fr 1.25fr; grid-template-rows: clamp(170px, 23vh, 300px); }
+  #info-card { grid-column: auto; max-height: none; font-size: 13px; padding: 8px 10px; }
+  #info-card .ic-name { font-size: 16px; }
+  #info-card .ic-phase canvas { width: 40px; height: 40px; }
+  #info-card .ic-row { padding: 3px 0; }
+  .dock-row { grid-template-columns: 1fr; }
+  .dock-row2 { grid-template-columns: 1fr; }
+  .ticks { display: block; }
+}
+.presets { justify-content: flex-start !important; }
+.presets > :first-child { margin-left: auto; }

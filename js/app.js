@@ -309,8 +309,9 @@ function skyMoonMaterial(extraOpacity = 1) {
   const m = new THREE.MeshStandardMaterial({ map: T_MOON, roughness: 1, metalness: 0, transparent: true, opacity: extraOpacity });
   m.onBeforeCompile = sh => {
     sh.uniforms.darkAlpha = darkAlpha;
-    sh.fragmentShader = 'uniform float darkAlpha;\n' + sh.fragmentShader.replace('#include <dithering_fragment>',
-      '#include <dithering_fragment>\n gl_FragColor.rgb = min(gl_FragColor.rgb * 2.1, vec3(1.0));\n float lumM = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n gl_FragColor.a = max(smoothstep(0.012, 0.09, lumM), darkAlpha) * opacity;');
+    sh.vertexShader = 'varying vec3 vWN;\n' + sh.vertexShader.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n vWN = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = 'uniform float darkAlpha;\nvarying vec3 vWN;\n' + sh.fragmentShader.replace('#include <dithering_fragment>',
+      '#include <dithering_fragment>\n gl_FragColor.rgb = min(gl_FragColor.rgb * 2.1, vec3(1.0));\n float litM = smoothstep(-0.03, 0.08, dot(normalize(vWN), vec3(1.0, 0.0, 0.0)));\n gl_FragColor.a = max(litM, darkAlpha) * opacity;');
   };
   return m;
 }
@@ -446,11 +447,6 @@ function updateScene() {
     g.userData = { D, alt: hg.alt };
   });
   // 地面相機
-  if (S.followMoon) {
-    const half = S.look.fov / 2, tgtAz = cur.mh.alt > -3 ? cur.mh.az : S.look.az;
-    const tgtAlt = THREE.MathUtils.clamp(cur.mh.alt - S.look.fov * 0.22, 14, Math.max(14, half - 7));
-    let dAz = ((tgtAz - S.look.az + 540) % 360) - 180; S.look.az = (S.look.az + dAz * 0.25 + 360) % 360; S.look.alt += (tgtAlt - S.look.alt) * 0.25;
-  }
   S.dirty = true;
 }
 // 殘影的光照要是「當天」的月相：用自己的光源方向
@@ -515,13 +511,13 @@ function spaceLabels(slot, cam, w, h, mini) {
       labelAt(slot, 'hl', '黃圈：被太陽照亮的一半', 'sun', moonGroup.position, cam, w, h, 38);
       labelAt(slot, 'hs', '藍圈：朝向地球、看得到的一半', 'hint', moonGroup.position, cam, w, h, 66);
     }
-    if (S.opt.orbit) labelAt(slot, 'orb', '月球公轉 ↺（約 29.5 天回到同一個月相）', 'alt', dirAt(Math.PI).multiplyScalar(ORBIT + 0.4), cam, w, h, 0, true);
+    if (S.opt.orbit) labelAt(slot, 'orb', '月球公轉 ↺ 約 29.5 天', 'alt', dirAt(Math.PI).multiplyScalar(ORBIT + 0.4), cam, w, h);
   }
 }
 function groundLabels(slot, cam, w, h, mini) {
   const B = cur.B;
   for (let i = 0; i < 8; i++) labelAt(slot, 'd' + i, DIR8[i], i % 2 ? 'dir small' : 'dir', fromHoriz(i * 45, 1.5, B).multiplyScalar(1000), cam, w, h);
-  if (!mini && S.opt.grid) for (const a of [30, 60]) labelAt(slot, 'g' + a, `高度角 ${a}°`, 'alt', fromHoriz(S.look.az, a, B).multiplyScalar(1000), cam, w, h);
+  if (!mini && S.opt.grid) for (const a of [30, 60]) { const pp = project(fromHoriz(S.look.az, a, B).multiplyScalar(1000), cam, w, h); if (pp && pp.y > 96 && pp.y < h - 130) putLabel(slot, 'g' + a, `高度角 ${a}°`, 'alt', pp.x + 46, pp.y); }
   const mh = cur.mh, sh = cur.sh;
   const mText = `🌙 ${lunarName(S.D)} ${cur.ph.short}${mh.alt < 0 ? '（地平線下）' : ''}`;
   if (!mini) {
@@ -538,16 +534,17 @@ function groundLabels(slot, cam, w, h, mini) {
   labelAt(slot, 'moon', mText, 'moon' + (mh.alt < 0 ? ' below' : ''), skyMoon.position.clone().addScaledVector(B.up, SKY_MOON_R * 1.25), cam, w, h, -14);
   labelAt(slot, 'sun', sh.alt < 0 ? '☀️ 太陽（地平線下）' : '☀️ 太陽', 'sun' + (sh.alt < 0 ? ' below' : ''), SUN_DIR.clone().multiplyScalar(900).addScaledVector(B.up, 60), cam, w, h);
   if (mini) return;
-  if (mh.alt <= 0) putLabel(slot, 'altread', `🌙 月亮在地平線下（${dir8(mh.az)}方），現在看不到`, 'altread hud below', w / 2, w < 620 ? h - 96 : 50);
+  if (mh.alt <= 0) putLabel(slot, 'altread', `🌙 月亮在地平線下（${dir8(mh.az)}方），現在看不到`, 'altread hud below', w / 2, h - 100);
   if (mh.alt > 0) {
-    putLabel(slot, 'altread', `🌙 月亮在${dir8(mh.az)}方・高度角 ${Math.round(mh.alt)}°${S.opt.fist ? `（約 ${(mh.alt / 10).toFixed(1)} 個拳頭）` : ''}`, 'altread hud', w / 2, w < 620 ? h - 96 : 50);
+    putLabel(slot, 'altread', `🌙 月亮在${dir8(mh.az)}方・高度角 ${Math.round(mh.alt)}°${S.opt.fist ? `（約 ${(mh.alt / 10).toFixed(1)} 個拳頭）` : ''}`, 'altread hud', w / 2, h - 100);
     if (S.opt.fist) for (let k = 0; k * 10 + 5 < mh.alt - 5; k++) labelAt(slot, 'f' + k, '✊', 'fist', fromHoriz(mh.az, k * 10 + 5, B).multiplyScalar(1000), cam, w, h);
   }
   if (S.opt.path) {
     for (let H = 0; H < 24; H += 2) {
       const dT = Math.abs(((H - S.T) + 36) % 24 - 12); if (dT < 1.3) continue;
       const hh = horiz(dirAt(elong(S.D, H)), basis(H)); if (hh.alt < 3) continue;
-      labelAt(slot, 'h' + H, `${H}時`, 'hour', fromHoriz(hh.az, hh.alt, B).multiplyScalar(1000).addScaledVector(B.up, -38), cam, w, h);
+      const pp = project(fromHoriz(hh.az, hh.alt, B).multiplyScalar(1000).addScaledVector(B.up, -38), cam, w, h);
+      if (pp && pp.y > 96 && pp.y < h - 130 && pp.x > 30 && pp.x < w - 30) putLabel(slot, 'h' + H, `${H}時`, 'hour', pp.x, pp.y);
     }
   }
   ghosts.forEach((g, i) => { if (g.visible) labelAt(slot, 'gh' + i, lunarName(g.userData.D), 'ghost', g.position.clone().addScaledVector(B.up, SKY_MOON_R * 1.05), cam, w, h, -10); });
@@ -577,11 +574,10 @@ const TOOLS = {
     <div class="tool-group">
       ${chip('grid', '🧭 方位格線')}${chip('fist', '✊ 拳頭量高度')}${chip('path', '〰️ 今天的軌跡')}${chip('ghosts', '👣 每天同一時間')}${chip('seeThrough', '🫥 透視地面')}
     </div>`, `
-    <button type="button" class="chip go back" id="btn-fly-out">🛸 飛回太空</button>
-    <div class="tool-group face-group">
-      <button type="button" class="chip" data-face="90"><span class="fx">面向</span>東</button><button type="button" class="chip" data-face="180"><span class="fx">面向</span>南</button><button type="button" class="chip" data-face="270"><span class="fx">面向</span>西</button><button type="button" class="chip" data-face="0"><span class="fx">面向</span>北</button>
-    </div>
-    <button type="button" class="chip ${S.followMoon ? 'on' : ''}" id="btn-follow">🎯 跟著月亮</button>`],
+    <div class="tool-group act-row"><button type="button" class="chip ${S.followMoon ? 'on' : ''}" id="btn-follow">🎯 跟著月亮</button><button type="button" class="chip go back" id="btn-fly-out">🛸 飛回太空</button></div>
+    <div class="tool-group face-group"><span class="face-lbl">面向</span>
+      <button type="button" class="chip" data-face="90">東</button><button type="button" class="chip" data-face="180">南</button><button type="button" class="chip" data-face="270">西</button><button type="button" class="chip" data-face="0">北</button>
+    </div>`],
   scope: () => [`
     <div class="tool-group">${chip('maria', '🗺 月海標示（古人看成玉兔）')}</div>`, `
     <div class="tool-group"><button type="button" class="chip" data-zoom="-1">－ 縮小</button><button type="button" class="chip" data-zoom="1">＋ 放大</button></div>`]
@@ -883,16 +879,26 @@ function toast(msg) { const t = document.getElementById('toast'); t.textContent 
 // 主迴圈
 // =====================================================================
 let acc = 0, last = performance.now();
-function rectOf(el) { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
+let CV = { x: 0, y: 0, w: 1, h: 1 };
+function rectOf(el) { const r = el.getBoundingClientRect(); return { x: r.left - CV.x, y: r.top - CV.y, w: r.width, h: r.height }; }
 function resize() {
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const r = canvas.getBoundingClientRect();
+  CV = { x: r.left, y: r.top, w: Math.max(1, r.width), h: Math.max(1, r.height) };
+  renderer.setSize(CV.w, CV.h, false);
   S.dirty = true;
 }
-window.addEventListener('resize', resize); resize();
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+resize();
+new ResizeObserver(() => resize()).observe(document.body);
 new ResizeObserver(() => { S.dirty = true; }).observe(document.getElementById('stage'));
+window.addEventListener('scroll', () => { window.scrollTo(0, 0); resize(); }, { passive: true });
 
 function renderAll() {
-  const H = window.innerHeight;
+  const cr = canvas.getBoundingClientRect();
+  if (Math.abs(cr.width - CV.w) > 0.5 || Math.abs(cr.height - CV.h) > 0.5 || Math.abs(cr.top - CV.y) > 0.5) resize();
+  const H = CV.h;
   renderer.setScissorTest(false); renderer.setClearColor(0x040814); renderer.clear(); renderer.setScissorTest(true);
   for (const [slotKey, el] of Object.entries(SLOTS)) {
     const r = rectOf(el); if (r.w < 4 || r.h < 4) continue;
@@ -901,7 +907,7 @@ function renderAll() {
     let cam;
     if (view === 'space') { cam = spaceCam; cam.aspect = r.w / r.h; cam.updateProjectionMatrix(); renderer.render(space, cam); }
     else if (view === 'ground') { cam = groundCam; cam.aspect = r.w / r.h; aimGround(cam); if (mini) { cam.fov = Math.max(cam.fov, 80); cam.updateProjectionMatrix(); } renderer.render(sky, cam); }
-    else { cam = scopeCam; cam.aspect = r.w / r.h; aimScope(cam, cam.aspect); renderer.render(sky, cam); }
+    else { cam = scopeCam; cam.aspect = r.w / r.h; aimScope(cam, cam.aspect); if (mini) { cam.fov *= 1.35; cam.setViewOffset(r.w, r.h, 0, -Math.min(22, r.h * 0.1), r.w, r.h); } else cam.clearViewOffset(); cam.updateProjectionMatrix(); renderer.render(sky, cam); }
     cam.updateMatrixWorld();
     if (view === 'space') spaceLabels(el, cam, r.w, r.h, mini);
     else if (view === 'ground') groundLabels(el, cam, r.w, r.h, mini);
@@ -924,6 +930,14 @@ function loop(now) {
   }
   if (S.opt.rays) { rayMat.dashOffset -= dt * 2.2; S.dirty = S.dirty || S.views.main === 'space'; }
   if (controls) controls.update();
+  if (S.followMoon && cur && !S.flying) {
+    const half = S.look.fov / 2, tgtAz = cur.mh.alt > -3 ? cur.mh.az : S.look.az;
+    const tgtAlt = THREE.MathUtils.clamp(cur.mh.alt - S.look.fov * 0.22, 22, Math.max(22, half - 7));
+    const dAz = ((tgtAz - S.look.az + 540) % 360) - 180, dAlt = tgtAlt - S.look.alt;
+    if (Math.abs(dAz) > 0.05 || Math.abs(dAlt) > 0.05) {
+      const k = Math.min(1, dt * 5); S.look.az = (S.look.az + dAz * k + 360) % 360; S.look.alt += dAlt * k; S.dirty = true;
+    }
+  }
   meRing.scale.setScalar(1 + 0.25 * Math.sin(now / 300));
   if (S.dirty || tweens.length || S.play) { renderAll(); S.dirty = false; }
   requestAnimationFrame(loop);
