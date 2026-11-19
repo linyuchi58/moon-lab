@@ -6,9 +6,9 @@
 <title>日地月 3D 實驗室 v12｜飛進小人的眼睛</title>
 <meta name="description" content="用真實 NASA 月球與地球，從太空、從台灣地面、從望遠鏡三個視角同時看月相、月亮東升西落與每天晚約 50 分鐘。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🌙%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=12.2">
+<link rel="stylesheet" href="css/app.css?v=12.3">
 <link rel="stylesheet" href="css/seatpick.css?v=12.2">
-<link rel="stylesheet" href="css/quiz.css?v=12.2">
+<link rel="stylesheet" href="css/quiz.css?v=12.3">
 </head>
 <body class="lv-e">
 
@@ -21,13 +21,19 @@
     <span class="ver">v12</span>
   </div>
   <div class="top-actions">
-    <button type="button" class="tbtn quiz-go" id="btn-quiz" onclick="openQuizHome()">🏆 挑戰測驗</button>
-    <button type="button" class="tbtn" id="btn-teacher" onclick="openTeacherLogin()">👩‍🏫 教師</button>
+    <button type="button" class="tbtn quiz-go" id="btn-quiz" onclick="openQuizHome()">🏆<span class="tx"> 挑戰測驗</span></button>
+    <button type="button" class="tbtn" id="btn-teacher" onclick="openTeacherLogin()" title="教師後台">👩‍🏫<span class="tx"> 教師</span></button>
+    <div class="seg sky-seg" id="sky-seg" role="tablist" aria-label="天空模式">
+      <button type="button" data-sky="ideal" class="on">🧪 理想<span class="tx">模型</span></button>
+      <button type="button" data-sky="real">🔭 真實<span class="tx">天空</span></button>
+    </div>
+    <select id="city-sel" class="city-sel" aria-label="觀測地點"></select>
+    <button type="button" class="tbtn real-only" id="btn-now" title="跳到現在">🕒<span class="tx"> 現在</span></button>
     <div class="seg" id="level-seg" role="tablist" aria-label="程度">
       <button type="button" data-lv="e" class="on">國小</button>
       <button type="button" data-lv="j">國中</button>
     </div>
-    <button type="button" class="tbtn" id="btn-help">❓ 怎麼玩</button>
+    <button type="button" class="tbtn" id="btn-help" title="怎麼玩">❓<span class="tx"> 怎麼玩</span></button>
     <button type="button" class="tbtn gold" id="btn-fs">⛶ 全螢幕</button>
   </div>
 </header>
@@ -112,6 +118,9 @@
       <li><b>🔭 望遠鏡</b>：放大看真實月球表面，亮的那一邊就是陽光照來的方向。</li>
       <li>拉動下方的<b>農曆日期</b>（月亮繞地球）和<b>時間</b>（地球自轉），三個畫面會一起變。</li>
       <li>在太空畫面按 <b>🚀 飛進小人的眼睛</b>，鏡頭會從太空一路飛到台灣小人身上，再抬頭看天空！</li>
+      <li><b>🗺 時間地圖</b>（資訊卡上方）：一眼看出月亮每天晚約 50 分鐘升起，點一格就跳到那個時刻。</li>
+      <li><b>🔭 真實天空</b>：用天文公式算出你所在城市「現在」的月亮；在「站在台灣看天空」按 <b>📱 舉起平板找月亮</b>，把平板對著天空就能找到月亮！</li>
+      <li><b>📏 真實比例</b>（太空畫面）：看看月亮其實離地球多遠、有多小。</li>
       <li>探索夠了，按右上角 <b>🏆 挑戰測驗</b>：題目每次都不一樣，要動手操作、先預測再觀察！</li>
     </ol>
     <p class="note">📝 這是「理想模型」：為了好懂，地軸和月球軌道都畫成不傾斜，地球和月亮的距離也縮短了；天空中的月亮也畫得比真實大（約 12 倍），才看得清楚月相。月亮升起的方位、時間和真實天空會有一點差異。</p>
@@ -227,9 +236,9 @@
 </div>
 
 <script src="js/astronomy.browser.min.js" defer></script>
-<script src="js/quiz.js?v=12.2" defer></script>
+<script src="js/quiz.js?v=12.3" defer></script>
 <script src="js/seatpick.js?v=12.2" defer></script>
-<script type="module" src="js/app.js?v=12.2"></script>
+<script type="module" src="js/app.js?v=12.3"></script>
 <noscript><div style="padding:30px;color:#fff;font-size:20px">請開啟瀏覽器的 JavaScript 才能使用。</div></noscript>
 </body>
 </html>

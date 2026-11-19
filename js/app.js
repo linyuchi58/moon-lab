@@ -15,6 +15,7 @@ const MOON_R = 0.44;                 // 太空畫面：月球半徑（放大）
 const SKY_MOON_D = 800;              // 天空畫面：月亮距離
 const SKY_MOON_R = SKY_MOON_D * Math.tan(3.0 * Math.PI / 180);  // 天空中月亮畫成約 6°（真實 0.5°，放大約 12 倍才看得清楚月相）
 const SUN_DIR = new THREE.Vector3(1, 0, 0);
+const SC = { orbit: 7, moon: 1, skyMoon: 1 };   // 目前的比例（📏 真實比例、🔍 月亮真實大小會改變）
 const NEW0 = 0.235;                  // 朔在初一 05:38 → 初八傍晚上弦、十五半夜滿月過正南、廿三清晨下弦（對齊課本）
 const LUNAR = ['初一','初二','初三','初四','初五','初六','初七','初八','初九','初十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','廿一','廿二','廿三','廿四','廿五','廿六','廿七','廿八','廿九','三十'];
 const DIR8 = ['北','東北','東','東南','南','西南','西','西北'];
@@ -31,7 +32,8 @@ const S = {
   views: { main: 'space', a: 'ground', b: 'scope' },
   opt: { rays: true, orbit: true, horizon: true, sight: true, halves: false, lockPerson: false, grid: true, fist: true, path: true, ghosts: false, seeThrough: false, maria: false },
   flying: false, dirty: true,
-  mask: { day: false, time: false, phase: false, alt: false, info: false }, lock: { day: false, time: false }, marks: null, hideMoon: false
+  mask: { day: false, time: false, phase: false, alt: false, info: false }, lock: { day: false, time: false }, marks: null, hideMoon: false,
+  real: null, trueScale: false, trueMoonSize: false, gyro: false
 };
 try {
   const lv = localStorage.getItem('MOON_LEVEL'); if (lv === 'j' || lv === 'e') S.level = lv;
@@ -100,6 +102,53 @@ function riseSet(D) {
   }
   return { rise, set };
 }
+
+// ---------------- 🔭 真實天空（Astronomy Engine，台灣時間 UTC+8） ----------------
+const AE = () => window.Astronomy;
+const CITIES = [['台北', 25.03, 121.56], ['新北', 25.01, 121.46], ['桃園', 24.99, 121.30], ['新竹', 24.80, 120.97], ['苗栗', 24.56, 120.82], ['台中', 24.15, 120.67],
+  ['彰化', 24.08, 120.54], ['南投', 23.91, 120.68], ['雲林', 23.71, 120.43], ['嘉義', 23.48, 120.45], ['台南', 22.99, 120.21], ['高雄', 22.63, 120.30],
+  ['屏東', 22.67, 120.49], ['宜蘭', 24.75, 121.75], ['花蓮', 23.99, 121.60], ['台東', 22.76, 121.14], ['澎湖', 23.57, 119.58], ['金門', 24.43, 118.32], ['馬祖', 26.16, 119.95]];
+const DAY_MS = 86400000, TZ_MS = 8 * 3600000;
+const localDayIndex = ms => Math.floor((ms + TZ_MS) / DAY_MS);            // 台灣日期的「第幾天」
+const localMidnightUTC = dayIdx => dayIdx * DAY_MS - TZ_MS;
+const lunarCache = new Map();
+function lastNewMoonDay(dayIdx) {                                          // 這一天（含）以前最近一次朔所在的台灣日期
+  if (lunarCache.has(dayIdx)) return lunarCache.get(dayIdx);
+  const A = AE(), endMs = localMidnightUTC(dayIdx + 1);
+  let t = A.SearchMoonPhase(0, new Date(endMs - 32 * DAY_MS), 32), best = null;
+  while (t && t.date.getTime() < endMs) { best = t.date.getTime(); t = A.SearchMoonPhase(0, new Date(best + 2 * DAY_MS), 32); }
+  const r = localDayIndex(best); lunarCache.set(dayIdx, r); return r;
+}
+function lunarDayOf(dayIdx) { return dayIdx - lastNewMoonDay(dayIdx) + 1; }
+function realMs(D, T) { return S.real.base + (D - 1) * DAY_MS + T * 3600000; }
+function realDayIdx(D) { return localDayIndex(S.real.base) + (D - 1); }
+function realDateStr(D) { const d = new Date(localMidnightUTC(realDayIdx(D)) + TZ_MS); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; }
+function realHoriz(body, ms) {
+  const A = AE(), t = new Date(ms), eq = A.Equator(body, t, S.real.obs, true, true), h = A.Horizon(t, S.real.obs, eq.ra, eq.dec, 'normal');
+  return { alt: h.altitude, az: h.azimuth };
+}
+function realAt(D, T) {
+  const ms = realMs(D, T), A = AE();
+  return { ms, mh: realHoriz(A.Body.Moon, ms), sh: realHoriz(A.Body.Sun, ms), e: A.MoonPhase(new Date(ms)) * Math.PI / 180, illum: A.Illumination(A.Body.Moon, new Date(ms)).phase_fraction };
+}
+function solarT(T) { return S.real ? T + (S.real.lon - 120) / 15 : T; }
+function setReal(on, opts = {}) {
+  if (!on) { S.real = null; lunarCache.clear(); }
+  else {
+    if (!AE()) { toast('真實天空的計算程式還在載入，請稍等再試'); return false; }
+    let city = CITIES.find(c => c[0] === (opts.city || (S.real && S.real.city) || localStorage.getItem('MOON_CITY') || '台中')) || CITIES[5];
+    const now = opts.ms || Date.now(), today = localDayIndex(now);
+    const nmDay = lastNewMoonDay(today);
+    S.real = { city: city[0], lat: city[1], lon: city[2], obs: new (AE().Observer)(city[1], city[2], 0), base: localMidnightUTC(nmDay) };
+    try { localStorage.setItem('MOON_CITY', city[0]); } catch (e) {}
+    if (opts.keepDT) { /* 換城市：日期時間不變 */ }
+    else { S.D = Math.min(30, today - nmDay + 1); const h = ((now + TZ_MS) % DAY_MS) / 3600000; S.T = Math.round(h * 12) / 12; }
+  }
+  tmCacheKey = ''; infoKey = '';
+  syncRealUI(); onStateChange();
+  return true;
+}
+function realLunarName(D) { const n = lunarDayOf(realDayIdx(D)); return LUNAR[Math.min(30, Math.max(1, n)) - 1]; }
 
 // ---------------- 渲染器 ----------------
 const canvas = document.getElementById('gl');
@@ -194,6 +243,12 @@ for (const z of [-6, -2.2, 2.2, 6]) for (const y of [0]) {
   for (const x of [11]) { const h = new THREE.Mesh(rayHeadGeo, rayHeadMat); h.position.set(x, y, z); h.rotation.z = Math.PI; rayGroup.add(h); }
 }
 
+const rayGroupBig = new THREE.Group(); rayGroupBig.visible = false; space.add(rayGroupBig);
+const rayMatBig = new THREE.LineDashedMaterial({ color: 0xfbbf24, dashSize: 6, gapSize: 4, transparent: true, opacity: 0.5 });
+for (const z of [-55, -18, 18, 55]) {
+  const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(260, 0, z), new THREE.Vector3(-90, 0, z)]), rayMatBig); l.computeLineDistances(); rayGroupBig.add(l);
+  const h = new THREE.Mesh(rayHeadGeo, rayHeadMat); h.scale.setScalar(6); h.position.set(90, 0, z); h.rotation.z = Math.PI; rayGroupBig.add(h);
+}
 // 地球（日夜分界 + 夜晚城市燈光 + 大氣）
 const earthGroup = new THREE.Group(); space.add(earthGroup);
 const earthMat = new THREE.ShaderMaterial({
@@ -308,14 +363,14 @@ const skySun = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), b
 skySun.scale.set(150, 150, 1); skySun.position.copy(SUN_DIR).multiplyScalar(900); sky.add(skySun);
 const skySunCore = new THREE.Mesh(new THREE.SphereGeometry(900 * Math.tan(0.012), 24, 16), new THREE.MeshBasicMaterial({ color: 0xfffbe8 }));
 skySunCore.position.copy(skySun.position); sky.add(skySunCore);
-const darkAlpha = { value: 0.9 };
+const darkAlpha = { value: 0.9 }, sunDirW = { value: new THREE.Vector3(1, 0, 0) };
 function skyMoonMaterial(extraOpacity = 1) {
   const m = new THREE.MeshStandardMaterial({ map: T_MOON, roughness: 1, metalness: 0, transparent: true, opacity: extraOpacity });
   m.onBeforeCompile = sh => {
-    sh.uniforms.darkAlpha = darkAlpha;
+    sh.uniforms.darkAlpha = darkAlpha; sh.uniforms.sunDirW = sunDirW;
     sh.vertexShader = 'varying vec3 vWN;\n' + sh.vertexShader.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n vWN = normalize(mat3(modelMatrix) * objectNormal);');
-    sh.fragmentShader = 'uniform float darkAlpha;\nvarying vec3 vWN;\n' + sh.fragmentShader.replace('#include <dithering_fragment>',
-      '#include <dithering_fragment>\n gl_FragColor.rgb = min(gl_FragColor.rgb * 2.1, vec3(1.0));\n float litM = smoothstep(-0.03, 0.08, dot(normalize(vWN), vec3(1.0, 0.0, 0.0)));\n gl_FragColor.a = max(litM, darkAlpha) * opacity;');
+    sh.fragmentShader = 'uniform float darkAlpha;\nuniform vec3 sunDirW;\nvarying vec3 vWN;\n' + sh.fragmentShader.replace('#include <dithering_fragment>',
+      '#include <dithering_fragment>\n gl_FragColor.rgb = min(gl_FragColor.rgb * 2.1, vec3(1.0));\n float litM = smoothstep(-0.03, 0.08, dot(normalize(vWN), sunDirW));\n gl_FragColor.a = max(litM, darkAlpha) * opacity;');
   };
   return m;
 }
@@ -387,23 +442,37 @@ const scopeCam = new THREE.PerspectiveCamera(4, 1, 0.3, 6000);
 // =====================================================================
 const tmpV = new THREE.Vector3();
 let cur = null; // 目前時刻的計算結果
+const WORLD_N = new THREE.Vector3(0, 1, 0);
 function computeNow() {
+  if (S.real && AE()) {
+    const r = realAt(S.D, S.T), Ts = solarT(S.T), B = basis(Ts);
+    const md = fromHoriz(r.mh.az, r.mh.alt, B), sd = fromHoriz(r.sh.az, r.sh.alt, B);
+    return { e: r.e, B, md, sd, mh: r.mh, sh: r.sh, ph: phaseOf(r.e), illum: r.illum, Ts, real: r, pole: fromHoriz(0, S.real.lat, B) };
+  }
   const e = elong(S.D, S.T), B = basis(S.T), md = dirAt(e);
   const mh = horiz(md, B), sh = horiz(SUN_DIR, B);
-  return { e, B, md, mh, sh, ph: phaseOf(e), illum: (1 - Math.cos(e)) / 2 };
+  return { e, B, md, sd: SUN_DIR.clone(), mh, sh, ph: phaseOf(e), illum: (1 - Math.cos(e)) / 2, Ts: S.T, pole: WORLD_N };
+}
+// 讓月球的正面朝向觀察者、月球北極朝向天球北極（真實天空與理想模型通用）
+const _mx = new THREE.Vector3(), _my = new THREE.Vector3(), _mz = new THREE.Vector3(), _mm = new THREE.Matrix4();
+function orientMoon(mesh, dir, pole) {
+  _mx.copy(dir).negate().normalize();
+  _my.copy(pole).addScaledVector(_mx, -pole.dot(_mx)); if (_my.lengthSq() < 1e-6) _my.set(0, 1, 0); _my.normalize();
+  _mz.crossVectors(_mx, _my);
+  mesh.quaternion.setFromRotationMatrix(_mm.makeBasis(_mx, _my, _mz));
 }
 let lastObs = obsAngle(S.T);
 function updateScene() {
   cur = computeNow();
   const { e, B, md } = cur;
-  // 太空
-  const a = obsAngle(S.T);
+  // 太空（真實天空模式也用同一個「理想幾何」畫：月亮角度＝真實月日夾角、地球自轉＝當地太陽時）
+  const a = obsAngle(cur.Ts);
   earthGroup.rotation.y = a - LON;
   if (S.opt.lockPerson && controls && !S.flying) { // 鏡頭跟著小人轉
     let d = a - lastObs; spaceCam.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), d); controls.update();
   }
   lastObs = a;
-  moonGroup.position.copy(md).multiplyScalar(ORBIT);
+  moonGroup.position.copy(dirAt(e)).multiplyScalar(SC.orbit);
   moonMesh.rotation.y = e + Math.PI;
   halfSeen.rotation.set(0, e + Math.PI + Math.PI / 2, 0);
   figure.rotation.y = -S.look.az * Math.PI / 180;
@@ -412,15 +481,19 @@ function updateScene() {
   const mpos = moonGroup.position;
   const p = sightGeo.attributes.position; p.setXYZ(0, head.x, head.y, head.z); p.setXYZ(1, mpos.x, mpos.y, mpos.z); p.needsUpdate = true; sightLine.computeLineDistances();
   sightLine.material.color.set(cur.mh.alt > 0 ? 0xfde047 : 0xf87171); sightLine.material.opacity = cur.mh.alt > 0 ? .95 : .45;
-  markMeshes.forEach((m, i) => { const mk = S.marks && S.marks[i]; m.visible = !!mk; if (mk) m.position.copy(dirAt(mk.angle)).multiplyScalar(ORBIT); });
+  markMeshes.forEach((m, i) => { const mk = S.marks && S.marks[i]; m.visible = !!mk; if (mk) m.position.copy(dirAt(mk.angle)).multiplyScalar(SC.orbit); });
   sightLine.visible = S.opt.sight && !S.hideMoon;
-  rayGroup.visible = S.opt.rays; orbitLine.visible = orbitArrows.visible = S.opt.orbit; hzDisk.visible = hzRing.visible = S.opt.horizon;
+  rayGroup.visible = S.opt.rays && !S.trueScale; rayGroupBig.visible = S.opt.rays && S.trueScale; orbitLine.visible = orbitArrows.visible = S.opt.orbit; hzDisk.visible = hzRing.visible = S.opt.horizon;
   sightLine.visible = S.opt.sight && !S.hideMoon; halfLit.visible = halfSeen.visible = S.opt.halves;
   moonMaria.visible = skyMoonMaria.visible = S.opt.maria;
   // 天空
   skyMat.uniforms.upW.value.copy(B.up);
   local.setRotationFromMatrix(new THREE.Matrix4().makeBasis(B.east, B.up, B.north.clone().negate()));
-  skyMoon.position.copy(md).multiplyScalar(SKY_MOON_D); skyMoon.rotation.y = e + Math.PI;
+  skyMoon.position.copy(md).multiplyScalar(SKY_MOON_D); orientMoon(skyMoon, md, cur.pole);
+  skyMoon.scale.setScalar(SC.skyMoon);
+  sunDirW.value.copy(cur.sd); skyMat.uniforms.sunDir.value.copy(cur.sd);
+  skySunLight.position.copy(cur.sd).multiplyScalar(1000);
+  skySun.position.copy(cur.sd).multiplyScalar(900); skySunCore.position.copy(skySun.position);
   const day = THREE.MathUtils.smoothstep(cur.sh.alt, -12, 4);
   skyStars.material.opacity = 1 - day;
   darkAlpha.value = THREE.MathUtils.lerp(0.88, 0.0, THREE.MathUtils.smoothstep(cur.sh.alt, -10, 2));
@@ -430,7 +503,17 @@ function updateScene() {
   gridGroup.visible = S.opt.grid;
   // 今日軌跡（月亮與太陽）
   moonPath.visible = sunPath.visible = S.opt.path;
-  if (S.opt.path) {
+  if (S.opt.path && S.real) {
+    const mp = moonPathGeo.attributes.position, sp = sunPathGeo.attributes.position, N = 97;
+    for (let i = 0; i < N; i++) {
+      const T = i / (N - 1) * 24, r = realAt(S.D, T);
+      const v1 = fromHoriz(r.mh.az, r.mh.alt, B).multiplyScalar(SKY_MOON_D - 5), v2 = fromHoriz(r.sh.az, r.sh.alt, B).multiplyScalar(890);
+      mp.setXYZ(i, v1.x, v1.y, v1.z); sp.setXYZ(i, v2.x, v2.y, v2.z);
+    }
+    moonPathGeo.setDrawRange(0, N); sunPathGeo.setDrawRange(0, N);
+    mp.needsUpdate = sp.needsUpdate = true; moonPath.computeLineDistances(); sunPath.computeLineDistances();
+  } else if (S.opt.path) {
+    moonPathGeo.setDrawRange(0, PATH_N); sunPathGeo.setDrawRange(0, PATH_N);
     const mp = moonPathGeo.attributes.position, sp = sunPathGeo.attributes.position;
     for (let i = 0; i < PATH_N; i++) {
       const T = i / (PATH_N - 1) * 24, Bt = basis(T);
@@ -445,11 +528,9 @@ function updateScene() {
   ghosts.forEach((g, i) => {
     const D = S.D - (i + 1); g.visible = S.opt.ghosts && D >= 1;
     if (!g.visible) return;
-    const eg = elong(D, S.T), hg = horiz(dirAt(eg), B);
-    g.position.copy(fromHoriz(hg.az, hg.alt, B)).multiplyScalar(SKY_MOON_D + 20);
-    // 讓殘影保持「當天」的月相：把月球擺成那天的朝向，並把整組轉到今天的天空位置
-    const q = new THREE.Quaternion().setFromUnitVectors(dirAt(eg), g.position.clone().normalize());
-    g.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), eg + Math.PI));
+    const hg = S.real ? realAt(D, S.T).mh : horiz(dirAt(elong(D, S.T)), B);
+    const gd = fromHoriz(hg.az, hg.alt, B);
+    g.position.copy(gd).multiplyScalar(SKY_MOON_D + 20); orientMoon(g, gd, cur.pole); g.scale.setScalar(SC.skyMoon);
     g.userData = { D, alt: hg.alt };
   });
   // 地面相機
@@ -465,7 +546,7 @@ function aimGround(cam) {
 function aimScope(cam, aspect) {
   const target = skyMoon.position;
   cam.position.set(0, 0, 0); cam.up.copy(cur.B.up); cam.lookAt(target);
-  const ang = 2 * SKY_MOON_R / SKY_MOON_D * 180 / Math.PI; // 月亮張角
+  const ang = 2 * SKY_MOON_R * SC.skyMoon / SKY_MOON_D * 180 / Math.PI; // 月亮張角
   const need = ang * 1.55 / S.scopeZoom;
   cam.fov = aspect < 1 ? need / aspect : need; cam.updateProjectionMatrix();
 }
@@ -492,25 +573,25 @@ function putLabel(slot, key, text, cls, x, y) {
 function project(v, cam, w, h) { const p = v.clone().project(cam); if (p.z > 1 || p.z < -1) return null; return { x: (p.x + 1) / 2 * w, y: (1 - p.y) / 2 * h, ndc: p }; }
 function labelAt(slot, key, text, cls, world, cam, w, h, dy = 0, clampIn = false) {
   let p = project(world, cam, w, h); if (!p) return false;
-  if (clampIn) { p.x = THREE.MathUtils.clamp(p.x, 40, w - 40); p.y = THREE.MathUtils.clamp(p.y, 20, h - 20); }
+  if (clampIn) { const m = Math.min(w / 2, Math.max(40, String(text).length * 7.5)); p.x = THREE.MathUtils.clamp(p.x, m, w - m); p.y = THREE.MathUtils.clamp(p.y, 20, h - 20); }
   else if (p.x < -60 || p.x > w + 60 || p.y < -30 || p.y > h + 30) return false;
   putLabel(slot, key, text, cls, p.x, p.y + dy); return true;
 }
 function endLabels(slot) { const P = pool(slot); for (const [k, el] of P.map) if (!P.used.has(k)) el.style.display = 'none'; P.used.clear(); }
 
-function lunarName(D) { return LUNAR[Math.min(30, Math.max(1, Math.round(D))) - 1]; }
+function lunarName(D) { if (S.real && AE()) return realLunarName(D); return LUNAR[Math.min(30, Math.max(1, Math.round(D))) - 1]; }
 
 function spaceLabels(slot, cam, w, h, mini) {
   const nm = lunarName(S.D);
-  labelAt(slot, 'sun', '☀️ 太陽', 'sun', sunGroup.position.clone().add(new THREE.Vector3(0, 5.2, 0)), cam, w, h, 0, true);
+  labelAt(slot, 'sun', S.trueScale ? '☀️ 太陽（真正還要再遠約 40 倍）' : '☀️ 太陽', 'sun', sunGroup.position.clone().add(new THREE.Vector3(0, 5.2 * sunGroup.scale.x, 0)), cam, w, h, 0, true);
   if (!mini && S.opt.rays) labelAt(slot, 'ray', '陽光（平行光）→ 照亮地球和月球的同一邊', 'ray', new THREE.Vector3(14, 0, 9.4), cam, w, h);
   labelAt(slot, 'earth', '🌍 地球', '', new THREE.Vector3(0, -1.35, 0), cam, w, h);
-  if (!S.hideMoon) labelAt(slot, 'moon', S.mask.day ? '🌙' : `🌙 ${nm}${mini || S.mask.phase ? '' : ' · ' + cur.ph.short}`, 'moon', moonGroup.position.clone().add(new THREE.Vector3(0, MOON_R + .5, 0)), cam, w, h);
-  if (S.marks) S.marks.forEach((m, i) => labelAt(slot, 'mk' + i, m.label, 'mark', dirAt(m.angle).multiplyScalar(ORBIT).add(new THREE.Vector3(0, MOON_R + .6, 0)), cam, w, h));
+  if (!S.hideMoon) labelAt(slot, 'moon', S.mask.day ? '🌙' : `🌙 ${nm}${mini || S.mask.phase ? '' : ' · ' + cur.ph.short}`, 'moon', moonGroup.position.clone().add(new THREE.Vector3(0, MOON_R * SC.moon + .5 * (S.trueScale ? 4 : 1), 0)), cam, w, h);
+  if (S.marks) S.marks.forEach((m, i) => labelAt(slot, 'mk' + i, m.label, 'mark', dirAt(m.angle).multiplyScalar(SC.orbit).add(new THREE.Vector3(0, MOON_R + .6, 0)), cam, w, h));
   const me = person.localToWorld(new THREE.Vector3(0, 0.42, 0));
   labelAt(slot, 'me', '🧍 我在台灣', 'me', me, cam, w, h);
   if (!mini) {
-    if (S.opt.horizon) {
+    if (S.opt.horizon && !S.trueScale) {
       [['東', [1.9, 0, 0]], ['南', [0, 0, 1.9]], ['西', [-1.9, 0, 0]], ['北', [0, 0, -1.9]]].forEach(([t, v]) =>
         labelAt(slot, 'hz' + t, t, 'dir tiny', person.localToWorld(new THREE.Vector3(...v)), cam, w, h));
     }
@@ -518,7 +599,7 @@ function spaceLabels(slot, cam, w, h, mini) {
       labelAt(slot, 'hl', '黃圈：被太陽照亮的一半', 'sun', moonGroup.position, cam, w, h, 38);
       labelAt(slot, 'hs', '藍圈：朝向地球、看得到的一半', 'hint', moonGroup.position, cam, w, h, 66);
     }
-    if (S.opt.orbit) labelAt(slot, 'orb', '月球公轉 ↺ 約 29.5 天', 'alt', dirAt(Math.PI).multiplyScalar(ORBIT + 0.4), cam, w, h);
+    if (S.opt.orbit) labelAt(slot, 'orb', S.trueScale ? '📏 月亮在 60 個地球半徑外（約 38 萬公里）' : '月球公轉 ↺ 約 29.5 天', S.trueScale ? 'hint' : 'alt', dirAt(Math.PI * 1.15).multiplyScalar(SC.orbit + 0.4), cam, w, h, 0, S.trueScale);
   }
 }
 function groundLabels(slot, cam, w, h, mini) {
@@ -538,8 +619,9 @@ function groundLabels(slot, cam, w, h, mini) {
       putLabel(slot, 'moonedge', `${arrow} 🌙 月亮在這邊`, 'hint', w / 2 + ax * k, h / 2 - ay * k);
     }
   }
-  if (!S.hideMoon) labelAt(slot, 'moon', mText, 'moon' + (mh.alt < 0 ? ' below' : ''), skyMoon.position.clone().addScaledVector(B.up, SKY_MOON_R * 1.25), cam, w, h, -14);
-  labelAt(slot, 'sun', sh.alt < 0 ? '☀️ 太陽（地平線下）' : '☀️ 太陽', 'sun' + (sh.alt < 0 ? ' below' : ''), SUN_DIR.clone().multiplyScalar(900).addScaledVector(B.up, 60), cam, w, h);
+  if (!S.hideMoon && SC.skyMoon < 0.5) labelAt(slot, 'ring', '', 'ring', skyMoon.position, cam, w, h);
+  if (!S.hideMoon) labelAt(slot, 'moon', mText, 'moon' + (mh.alt < 0 ? ' below' : ''), skyMoon.position.clone().addScaledVector(B.up, SKY_MOON_R * SC.skyMoon * 1.25), cam, w, h, -14);
+  labelAt(slot, 'sun', sh.alt < 0 ? '☀️ 太陽（地平線下）' : '☀️ 太陽', 'sun' + (sh.alt < 0 ? ' below' : ''), cur.sd.clone().multiplyScalar(900).addScaledVector(B.up, 60), cam, w, h);
   if (mini) return;
   if (mh.alt <= 0 && !S.mask.alt) putLabel(slot, 'altread', `🌙 月亮在地平線下（${dir8(mh.az)}方），現在看不到`, 'altread hud below', w / 2, h - 100);
   if (mh.alt > 0) {
@@ -549,16 +631,16 @@ function groundLabels(slot, cam, w, h, mini) {
   if (S.opt.path) {
     for (let H = 0; H < 24; H += 2) {
       const dT = Math.abs(((H - S.T) + 36) % 24 - 12); if (dT < 1.3) continue;
-      const hh = horiz(dirAt(elong(S.D, H)), basis(H)); if (hh.alt < 3) continue;
+      const hh = S.real ? realAt(S.D, H).mh : horiz(dirAt(elong(S.D, H)), basis(H)); if (hh.alt < 3) continue;
       const pp = project(fromHoriz(hh.az, hh.alt, B).multiplyScalar(1000).addScaledVector(B.up, -38), cam, w, h);
       if (pp && pp.y > 96 && pp.y < h - 130 && pp.x > 30 && pp.x < w - 30) putLabel(slot, 'h' + H, `${H}時`, 'hour', pp.x, pp.y);
     }
   }
-  ghosts.forEach((g, i) => { if (g.visible && !S.mask.day) labelAt(slot, 'gh' + i, lunarName(g.userData.D), 'ghost', g.position.clone().addScaledVector(B.up, SKY_MOON_R * 1.05), cam, w, h, -10); });
+  ghosts.forEach((g, i) => { if (g.visible && !S.mask.day) labelAt(slot, 'gh' + i, lunarName(g.userData.D), 'ghost', g.position.clone().addScaledVector(B.up, SKY_MOON_R * SC.skyMoon * 1.05), cam, w, h, -10); });
 }
 function scopeLabels(slot, cam, w, h, mini) {
   // 陽光方向箭頭：太陽方向投影到畫面上
-  const sv = SUN_DIR.clone().transformDirection(cam.matrixWorldInverse);
+  const sv = cur.sd.clone().transformDirection(cam.matrixWorldInverse);
   const len = Math.hypot(sv.x, sv.y);
   if (len > 1e-4 && cur.illum > 0.01) {
     const ux = sv.x / len, uy = -sv.y / len, r = Math.min(w, h) * 0.42;
@@ -573,15 +655,16 @@ function scopeLabels(slot, cam, w, h, mini) {
 const TOOLS = {
   space: () => [`
     <div class="tool-group">
-      ${chip('rays', '☀️ 陽光')}${chip('orbit', '⭕ 軌道')}${chip('horizon', '🟢 小人的地平面')}${chip('sight', '👁 視線')}${chip('halves', '🌓 兩個「一半」')}${chip('maria', '🗺 月海')}${chip('lockPerson', '🔒 鏡頭跟著小人')}
+      ${chip('rays', '☀️ 陽光')}${chip('orbit', '⭕ 軌道')}${chip('horizon', '🟢 小人的地平面')}${chip('sight', '👁 視線')}${chip('halves', '🌓 兩個「一半」')}${chip('trueScale', '📏 真實比例')}${chip('maria', '🗺 月海')}${chip('lockPerson', '🔒 鏡頭跟著小人')}
     </div>`, `
     <button type="button" class="chip go" id="btn-fly-in">🚀 飛進小人的眼睛</button>
     <div class="tool-group"><button type="button" class="chip" data-cam="tilt">斜看</button><button type="button" class="chip" data-cam="top">北極往下看</button><button type="button" class="chip" data-cam="side">側面看</button></div>`],
   ground: () => [`
     <div class="tool-group">
-      ${chip('grid', '🧭 方位格線')}${chip('fist', '✊ 拳頭量高度')}${chip('path', '〰️ 今天的軌跡')}${chip('ghosts', '👣 每天同一時間')}${chip('seeThrough', '🫥 透視地面')}
+      ${chip('grid', '🧭 方位格線')}${chip('fist', '✊ 拳頭量高度')}${chip('path', '〰️ 今天的軌跡')}${chip('ghosts', '👣 每天同一時間')}${chip('trueMoonSize', '🔍 月亮真實大小')}${chip('seeThrough', '🫥 透視地面')}
     </div>`, `
     <div class="tool-group act-row"><button type="button" class="chip ${S.followMoon ? 'on' : ''}" id="btn-follow">🎯 跟著月亮</button><button type="button" class="chip go back" id="btn-fly-out">🛸 飛回太空</button></div>
+    ${(('DeviceOrientationEvent' in window) && matchMedia('(any-pointer: coarse)').matches) || S.gyro ? `<button type="button" class="chip ${S.gyro ? 'on' : ''}" id="btn-gyro">📱 ${S.gyro ? '停止感應' : '舉起平板找月亮'}</button>` : ''}
     <div class="tool-group face-group"><span class="face-lbl">面向</span>
       <button type="button" class="chip" data-face="90">東</button><button type="button" class="chip" data-face="180">南</button><button type="button" class="chip" data-face="270">西</button><button type="button" class="chip" data-face="0">北</button>
     </div>`],
@@ -608,6 +691,8 @@ box.addEventListener('click', ev => {
   if (b.dataset.opt) {
     const k = b.dataset.opt; S.opt[k] = !S.opt[k]; b.classList.toggle('on', S.opt[k]);
     if (k === 'ghosts' && S.opt.ghosts) toast('👣 黃色淡淡的月亮＝前幾天「同一時間」的位置');
+    if (k === 'trueScale') { setTrueScale(S.opt[k]); return; }
+    if (k === 'trueMoonSize') { setTrueMoonSize(S.opt[k]); return; }
     if (k === 'lockPerson') lastObs = obsAngle(S.T);
     syncDuplicateChips(k); updateScene(); return;
   }
@@ -617,6 +702,7 @@ box.addEventListener('click', ev => {
   if (b.id === 'btn-follow') { S.followMoon = !S.followMoon; b.classList.toggle('on', S.followMoon); updateScene(); return; }
   if (b.id === 'btn-fly-in') { flyIn(); return; }
   if (b.id === 'btn-fly-out') { flyOut(); return; }
+  if (b.id === 'btn-gyro') { toggleGyro(); return; }
 });
 }
 function syncDuplicateChips(k) { document.querySelectorAll(`[data-opt="${k}"]`).forEach(x => x.classList.toggle('on', S.opt[k])); }
@@ -636,6 +722,69 @@ function setSpaceCam(kind) {
   tween(800, t => { spaceCam.position.lerpVectors(spaceCam.position.clone(), to, t); spaceCam.lookAt(0, 0, 0); if (controls) controls.update(); S.dirty = true; });
 }
 
+// ---------------- 📏 真實比例、🔍 月亮真實大小 ----------------
+function setTrueScale(on) {
+  S.trueScale = on; S.opt.trueScale = on; syncDuplicateChips('trueScale');
+  const o0 = SC.orbit, m0 = SC.moon, o1 = on ? 60 : ORBIT, m1 = on ? 0.273 / MOON_R : 1;
+  const s0 = sunGroup.position.x, s1 = on ? 600 : 55, k0 = sunGroup.scale.x, k1 = on ? 4 : 1;
+  const c0 = spaceCam.position.clone(), c1 = on ? c0.clone().setLength(Math.max(150, c0.length() * 9)) : SPACE_HOME.clone();
+  if (controls) controls.maxDistance = on ? 360 : 70;
+  tween(1800, t => {
+    const k = ease(t);
+    SC.orbit = o0 + (o1 - o0) * k; SC.moon = m0 + (m1 - m0) * k;
+    sunGroup.position.x = s0 + (s1 - s0) * k; sunGroup.scale.setScalar(k0 + (k1 - k0) * k);
+    orbitLine.scale.setScalar(SC.orbit / ORBIT); orbitArrows.scale.setScalar(SC.orbit / ORBIT); moonGroup.scale.setScalar(SC.moon);
+    spaceCam.position.lerpVectors(c0, c1, k); spaceCam.lookAt(0, 0, 0); if (controls) controls.update();
+    updateScene();
+  });
+  if (on) toast('📏 真實比例：月亮離地球約 30 個地球直徑，月亮本身只有地球的四分之一大！');
+}
+function setTrueMoonSize(on) {
+  S.trueMoonSize = on; S.opt.trueMoonSize = on; syncDuplicateChips('trueMoonSize');
+  const a = SC.skyMoon, b = on ? 0.52 / 6 : 1;
+  tween(900, t => { SC.skyMoon = a + (b - a) * ease(t); updateScene(); });
+  if (on) toast('🔍 真實大小：月亮在天上只有約 0.5°，伸直手臂，小拇指就能遮住！');
+}
+
+// ---------------- 📱 舉起平板找月亮（方向感應器） ----------------
+let gyroHandler = null, gyroEvt = '', gyroGot = false;
+function deviceLook(alpha, beta, gamma) {
+  const d = Math.PI / 180, cA = Math.cos(alpha * d), sA = Math.sin(alpha * d), cB = Math.cos(beta * d), sB = Math.sin(beta * d), cG = Math.cos(gamma * d), sG = Math.sin(gamma * d);
+  const vE = -(cG * sA * sB + cA * sG), vN = -(sA * sG - cA * cG * sB), vU = -cB * cG;     // 平板背面（相機）指向（東、北、上）
+  let az = Math.atan2(vE, vN) / d; if (az < 0) az += 360;
+  return { az, alt: Math.asin(Math.max(-1, Math.min(1, vU))) / d };
+}
+async function toggleGyro() {
+  if (S.gyro) { stopGyro(); return; }
+  if (!('DeviceOrientationEvent' in window)) { toast('這台裝置沒有方向感應器，請用平板或手機'); return; }
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { toast('要按「允許」動作與方向，才能用平板找月亮喔'); return; }
+    }
+  } catch (e) { toast('無法取得方向感應權限'); return; }
+  S.gyro = true; S.followMoon = false; gyroGot = false;
+  gyroEvt = ('ondeviceorientationabsolute' in window) ? 'deviceorientationabsolute' : 'deviceorientation';
+  let warned = false;
+  gyroHandler = ev => {
+    if (ev.alpha == null || ev.beta == null) return;
+    let alpha = ev.alpha;
+    if (typeof ev.webkitCompassHeading === 'number' && !isNaN(ev.webkitCompassHeading)) alpha = 360 - ev.webkitCompassHeading;
+    else if (!ev.absolute && ev.type !== 'deviceorientationabsolute' && !warned) { warned = true; toast('這台裝置沒有指南針，方位可能不準'); }
+    gyroGot = true;
+    const v = deviceLook(alpha, ev.beta, ev.gamma || 0);
+    const dAz = ((v.az - S.look.az + 540) % 360) - 180;
+    S.look.az = (S.look.az + dAz * 0.3 + 360) % 360; S.look.alt += (THREE.MathUtils.clamp(v.alt, -20, 88) - S.look.alt) * 0.3;
+    figure.rotation.y = -S.look.az * Math.PI / 180; S.dirty = true;
+  };
+  window.addEventListener(gyroEvt, gyroHandler);
+  if (!S.real) setReal(true);
+  setMain('ground'); renderTools();
+  toast('📱 把平板舉起來，像拍照一樣對著天空，畫面會跟著你轉！');
+  setTimeout(() => { if (S.gyro && !gyroGot) { toast('沒有收到方向資料：請用平板或手機開啟這個網頁'); stopGyro(); } }, 3000);
+}
+function stopGyro() { if (gyroHandler) window.removeEventListener(gyroEvt, gyroHandler); gyroHandler = null; S.gyro = false; renderTools(); }
+
 // ---------------- 地面視角拖曳 ----------------
 const gesture = { pts: new Map(), lastDist: 0, moved: 0 };
 SLOTS.main.addEventListener('pointerdown', ev => {
@@ -653,6 +802,7 @@ SLOTS.main.addEventListener('pointermove', ev => {
   if (S.views.main !== 'ground') return;
   const k = S.look.fov / SLOTS.main.clientHeight;
   S.look.az = (S.look.az - dx * k * 1.1 + 360) % 360; S.look.alt = THREE.MathUtils.clamp(S.look.alt + dy * k, -25, 88);
+  if (Math.abs(dx) + Math.abs(dy) > 2 && S.gyro) { stopGyro(); toast('已停止方向感應（改用手指轉動）'); }
   if (Math.abs(dx) + Math.abs(dy) > 2 && S.followMoon) { S.followMoon = false; const fb = document.getElementById('btn-follow'); if (fb) fb.classList.remove('on'); }
   updateScene();
 });
@@ -766,7 +916,7 @@ const lblDay = document.getElementById('lbl-day'), lblTime = document.getElement
     const s = document.createElement('span'); s.textContent = e; s.style.left = ((d - 1) / 29 * 100) + '%'; ticks.appendChild(s);
   });
 }
-function setDay(D, opts = {}) { S.D = ((Math.round(D) - 1 + 30) % 30) + 1; if (!opts.silent) tick(); onStateChange(); }
+function setDay(D, opts = {}) { if (S.real && (D < 1 || D > 30)) { S.real.base += (D < 1 ? -1 : 1) * DAY_MS; tmCacheKey = ''; D = D < 1 ? 1 : 30; } S.D = ((Math.round(D) - 1 + 30) % 30) + 1; if (!opts.silent) tick(); onStateChange(); }
 function setTime(T) { S.T = (T >= 24 && T < 24.001) ? 24 : ((T % 24) + 24) % 24; onStateChange(); }
 rngDay.addEventListener('input', () => setDay(+rngDay.value));
 rngTime.addEventListener('input', () => setTime(+rngTime.value));
@@ -792,7 +942,7 @@ document.querySelectorAll('.pre').forEach(b => b.addEventListener('click', () =>
 const changeHooks = [];
 function onStateChange() {
   rngDay.value = S.D; rngTime.value = S.T;
-  lblDay.textContent = S.mask.day ? '？？（要你判斷）' : `${lunarName(S.D)}（第 ${S.D} 天）`;
+  lblDay.textContent = S.mask.day ? '？？（要你判斷）' : S.real ? `${realDateStr(S.D)}（農曆${realLunarName(S.D)}）` : `${lunarName(S.D)}（第 ${S.D} 天）`;
   lblTime.textContent = S.mask.time ? '？？' : `${fmtT(S.T)} ${partOfDay(S.T)}`;
   updateScene(); renderInfo();
   changeHooks.forEach(f => { try { f(S); } catch (e) {} });
@@ -805,6 +955,10 @@ function applyLocks() {
 }
 function setQuizState(o = {}) {
   stopPlay();
+  if (S.gyro) stopGyro();
+  if (S.real) { S.real = null; syncRealUI(); }
+  if (S.trueScale) setTrueScale(false);
+  if (S.trueMoonSize) setTrueMoonSize(false);
   S.mask = Object.assign({ day: false, time: false, phase: false, alt: false, info: false }, o.mask || {});
   S.lock = Object.assign({ day: false, time: false }, o.lock || {});
   S.marks = o.marks || null; S.hideMoon = !!o.hideMoon;
@@ -833,6 +987,10 @@ function tick() {
 
 // ---------------- 資訊卡 ----------------
 const info = document.getElementById('info-card');
+info.innerHTML = `<div class="ic-tabs"><button type="button" data-ic="now" class="on">📋 現在</button><button type="button" data-ic="map">🗺 時間地圖</button><button type="button" class="ic-exp" title="放大時間地圖">⤢</button></div>
+  <div id="ic-now"></div><div id="ic-map" style="display:none"><canvas id="tm-canvas"></canvas><p class="tm-cap">🟨 黃色＝晚上月亮在天上・淡黃＝白天也在天上<br>👉 往下一天，黃色帶子就<b>往右移約 50 分鐘</b>！點一下就跳到那個時刻。</p></div>`;
+const icNow = document.getElementById('ic-now'), $tm = document.getElementById('tm-canvas');
+let icTab = 'now';
 const phaseIcon = document.createElement('canvas'); phaseIcon.width = phaseIcon.height = 108;
 function drawPhaseIcon(e) { // 北半球肉眼看到的樣子（西邊在右）
   const g = phaseIcon.getContext('2d'), r = 46, c = 54; g.clearRect(0, 0, 108, 108);
@@ -843,17 +1001,32 @@ function drawPhaseIcon(e) { // 北半球肉眼看到的樣子（西邊在右）
   g.ellipse(c, c, Math.abs(k) * r, r, 0, Math.PI / 2, -Math.PI / 2, waxing ? k > 0 : k < 0);
   g.fill(); g.strokeStyle = 'rgba(253,230,138,.6)'; g.lineWidth = 2; g.beginPath(); g.arc(c, c, r, 0, Math.PI * 2); g.stroke();
 }
+function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function realRiseSet(D) {
+  const A = AE(), start = localMidnightUTC(realDayIdx(D)), H = ms => (ms - start) / 3600000;
+  const r = A.SearchRiseSet(A.Body.Moon, S.real.obs, +1, new Date(start), 1);
+  const rise = r && r.date.getTime() < start + DAY_MS ? H(r.date.getTime()) : null;
+  if (rise === null) {
+    const st = A.SearchRiseSet(A.Body.Moon, S.real.obs, -1, new Date(start), 1);
+    const nr = A.SearchRiseSet(A.Body.Moon, S.real.obs, +1, new Date(start + DAY_MS), 1);
+    return { rise: null, set: st ? H(st.date.getTime()) : null, nextRise: nr ? H(nr.date.getTime()) : null };
+  }
+  const st = A.SearchRiseSet(A.Body.Moon, S.real.obs, -1, new Date(start + rise * 3600000), 1.2);
+  return { rise, set: st ? H(st.date.getTime()) : null };
+}
+
 function fmtRS(T) { return T === null ? '—' : (T >= 24 ? '隔天 ' + fmtT(T - 24) : fmtT(T)); }
 let infoKey = '';
 function renderInfo() {
   if (!cur) return;
   const { e, mh, sh, ph, illum } = cur, eDeg = Math.round(e * 180 / Math.PI) % 360;
-  const key = [S.D, Math.round(S.T * 12), S.level].join('|'); if (key === infoKey) return; infoKey = key;
-  const rs = riseSet(S.D), rsPrev = riseSet(S.D === 1 ? 30 : S.D - 1);
+  const key = [S.D, Math.round(S.T * 12), S.level, S.real ? S.real.city + S.real.base : ''].join('|'); if (key === infoKey) return; infoKey = key;
+  const rs = S.real ? realRiseSet(S.D) : riseSet(S.D), rsPrev = S.real ? realRiseSet(S.D - 1) : riseSet(S.D === 1 ? 30 : S.D - 1);
   let delay = (rs.rise !== null && rsPrev.rise !== null) ? Math.round(((rs.rise - rsPrev.rise + 24) % 24) * 60) : null;
   const mVis = mh.alt > 0;
   const why = explain(eDeg, mh, sh);
-  info.innerHTML = `
+  icNow.innerHTML = `
+    ${S.real ? `<div class="ic-real">🔭 真實天空・📍 ${esc(S.real.city)}・${realDateStr(S.D)} ${fmtT(S.T)}</div>` : ''}
     <div class="ic-phase"><div id="ic-icon"></div><div><div class="ic-name">${ph.emoji} 農曆${lunarName(S.D)}・${ph.name}</div>
       <div class="ic-sub">${fmtT(S.T)}（${partOfDay(S.T)}）・照亮 ${Math.round(illum * 100)}%</div></div></div>
     <div class="ic-row"><span>🌙</span><span>月亮在 <b>${dir8(mh.az)}方</b>，高度角 <b>${Math.round(mh.alt)}°</b>
@@ -861,9 +1034,119 @@ function renderInfo() {
     <div class="ic-row"><span>☀️</span><span>太陽在 <b>${dir8(sh.az)}方</b>，高度角 <b>${Math.round(sh.alt)}°</b>${Math.abs(sh.alt) < 1.5 ? (S.T < 12 ? '（日出）' : '（日落）') : sh.alt > 0 ? '（白天）' : '（夜晚）'}</span></div>
     <div class="ic-row"><span>⏰</span><span>${rs.rise === null ? `今天<b>沒有月出</b>！月沒 <b>${fmtRS(rs.set)}</b>，下次月出在 <b>${fmtRS(rs.nextRise)}</b>（月亮每天晚約 50 分鐘升起，剛好跳過了這一天）` : `月出 <b>${fmtRS(rs.rise)}</b>・月沒 <b>${fmtRS(rs.set)}</b>`}${delay !== null ? `<br>比昨天晚了約 <b>${delay} 分鐘</b>升起` : ''}</span></div>
     <div class="ic-row only-j"><span>📐</span><span>月日夾角：月亮在太陽<b>東邊 ${eDeg}°</b>（每天約增加 12°）</span></div>
+    ${S.real ? `<div class="ic-row"><span>📏</span><span>這是用天文公式算出的「真實」位置；和理想模型相比，月亮的高度會隨季節、月球軌道傾斜而改變。</span></div>` : ''}
     <div class="ic-why">💡 ${why}</div>`;
   drawPhaseIcon(e); document.getElementById('ic-icon').appendChild(phaseIcon);
 }
+
+// ---------------- 🗺 月亮時間地圖（橫軸：一天 24 小時；縱軸：每一天） ----------------
+const TM_COLS = 48;
+let tmCacheKey = '', tmData = null, tmBusy = false;
+function tmKey() { return S.real ? `R|${S.real.city}|${S.real.base}` : 'I'; }
+function computeTimeMap(done) {
+  const key = tmKey(); if (tmCacheKey === key && tmData) return done && done();
+  if (tmBusy) return; tmBusy = true;
+  const data = { moon: new Float32Array(30 * TM_COLS), sun: new Float32Array(30 * TM_COLS), labels: [], key };
+  let D = 1;
+  const step = () => {
+    const until = performance.now() + 25;
+    while (D <= 30 && performance.now() < until) {
+      for (let c = 0; c < TM_COLS; c++) {
+        const T = (c + 0.5) * 24 / TM_COLS;
+        if (S.real) { const r = realAt(D, T); data.moon[(D - 1) * TM_COLS + c] = r.mh.alt; data.sun[(D - 1) * TM_COLS + c] = r.sh.alt; }
+        else { const B = basis(T); data.moon[(D - 1) * TM_COLS + c] = horiz(dirAt(elong(D, T)), B).alt; data.sun[(D - 1) * TM_COLS + c] = horiz(SUN_DIR, B).alt; }
+      }
+      data.labels[D - 1] = S.real ? realDateStr(D) : LUNAR[D - 1];
+      D++;
+    }
+    if (D <= 30) { requestAnimationFrame(step); return; }
+    tmBusy = false;
+    if (key !== tmKey()) { computeTimeMap(done); return; }
+    tmData = data; tmCacheKey = key; done && done();
+  };
+  step();
+}
+function drawTimeMap(cv) {
+  if (!cv || !cv.isConnected || cv.offsetParent === null) return;
+  if (tmCacheKey !== tmKey() || !tmData) { computeTimeMap(() => { drawTimeMap($tm); drawTimeMap(document.getElementById('tm-big')); }); return; }
+  const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
+  if (W < 20 || H < 20) return;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const L = W > 420 ? 64 : 42, TOP = 18, cw = (W - L - 4) / TM_COLS, rh = (H - TOP - 2) / 30;
+  for (let d = 0; d < 30; d++) for (let c = 0; c < TM_COLS; c++) {
+    const m = tmData.moon[d * TM_COLS + c], sn = tmData.sun[d * TM_COLS + c];
+    let col = sn > 0 ? '#3b82c4' : sn > -10 ? '#7c4a2a' : '#0b1027';
+    if (m > 0) col = sn > 0 ? '#e8edc0' : '#fde047';
+    g.fillStyle = col; g.fillRect(L + c * cw, TOP + d * rh, Math.ceil(cw), Math.ceil(rh));
+  }
+  g.font = `800 ${Math.max(9, Math.min(12, rh * 0.9))}px sans-serif`; g.textAlign = 'right'; g.textBaseline = 'middle';
+  const every = rh < 9 ? 3 : rh < 13 ? 2 : 1;
+  for (let d = 0; d < 30; d++) if (d % every === 0 || d + 1 === S.D) { g.fillStyle = d + 1 === S.D ? '#fbbf24' : '#cbd5e1'; g.fillText(tmData.labels[d], L - 4, TOP + (d + 0.5) * rh); }
+  g.textAlign = 'center'; g.font = '800 11px sans-serif';
+  for (let h = 0; h <= 24; h += 6) { const x = L + h / 24 * (W - L - 4); g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(x, TOP, 1, H - TOP); g.fillStyle = '#cbd5e1'; g.fillText(h + '時', Math.min(W - 14, Math.max(L + 10, x)), 9); }
+  const x = L + (S.T % 24) / 24 * (W - L - 4), y = TOP + (S.D - 0.5) * rh;
+  g.strokeStyle = '#f472b6'; g.lineWidth = 2; g.strokeRect(L, TOP + (S.D - 1) * rh, W - L - 4, rh);
+  g.beginPath(); g.moveTo(x, TOP); g.lineTo(x, H); g.stroke();
+  g.fillStyle = '#f472b6'; g.beginPath(); g.arc(x, y, Math.max(5, rh * 0.6), 0, Math.PI * 2); g.fill(); g.strokeStyle = '#fff'; g.stroke();
+  cv._geo = { L, TOP, W, H, rh };
+}
+function tmPick(cv, ev) {
+  const gq = cv._geo; if (!gq || S.lock.day || S.lock.time) return;
+  const r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+  const T = THREE.MathUtils.clamp((x - gq.L) / (gq.W - gq.L - 4) * 24, 0, 23.99), D = THREE.MathUtils.clamp(Math.floor((y - gq.TOP) / gq.rh) + 1, 1, 30);
+  stopPlay(); S.D = D; setTime(Math.round(T * 12) / 12); drawTimeMap(cv);
+}
+function bindTimeMap(cv) {
+  let down = false;
+  cv.addEventListener('pointerdown', ev => { down = true; try { cv.setPointerCapture(ev.pointerId); } catch (e) {} tmPick(cv, ev); });
+  cv.addEventListener('pointermove', ev => { if (down) tmPick(cv, ev); });
+  cv.addEventListener('pointerup', () => { down = false; }); cv.addEventListener('pointercancel', () => { down = false; });
+}
+bindTimeMap($tm);
+info.querySelector('.ic-tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.classList.contains('ic-exp')) { openTimeMapBig(); return; }
+  icTab = b.dataset.ic; info.querySelectorAll('[data-ic]').forEach(x => x.classList.toggle('on', x === b));
+  icNow.style.display = icTab === 'now' ? '' : 'none'; document.getElementById('ic-map').style.display = icTab === 'map' ? '' : 'none';
+  if (icTab === 'map') requestAnimationFrame(() => drawTimeMap($tm));
+});
+function openTimeMapBig() {
+  let ov = document.getElementById('tm-modal');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'tm-modal'; ov.className = 'overlay';
+    ov.innerHTML = `<div class="tm-card"><div class="tm-head"><b>🗺 月亮時間地圖</b><span>橫軸是一天的時間、縱軸是每一天。黃色＝月亮在天上。</span><button type="button" class="tm-x" aria-label="關閉">✕</button></div><canvas id="tm-big"></canvas>
+      <p class="tm-cap">👉 黃色斜斜的帶子：月亮每天大約<b>晚 50 分鐘</b>升起，所以帶子每往下一天就往右移一點。點地圖任何一格，3D 宇宙就會跳到那個時刻。</p></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('.tm-x').addEventListener('click', () => ov.classList.remove('show'));
+    ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('show'); });
+    bindTimeMap(ov.querySelector('#tm-big'));
+  }
+  ov.classList.add('show'); requestAnimationFrame(() => drawTimeMap(ov.querySelector('#tm-big')));
+}
+changeHooks.push(() => { if (icTab === 'map') drawTimeMap($tm); const big = document.getElementById('tm-big'); if (big && big.offsetParent) drawTimeMap(big); });
+window.addEventListener('resize', () => { if (icTab === 'map') requestAnimationFrame(() => drawTimeMap($tm)); });
+
+// ---------------- 🧪 理想模型／🔭 真實天空 切換 ----------------
+function syncRealUI() {
+  document.body.classList.toggle('real', !!S.real);
+  document.querySelectorAll('#sky-seg button').forEach(b => b.classList.toggle('on', (b.dataset.sky === 'real') === !!S.real));
+  const sel = document.getElementById('city-sel'); if (sel && S.real) sel.value = S.real.city;
+}
+{
+  const sel = document.getElementById('city-sel');
+  if (sel) { sel.innerHTML = CITIES.map(c => `<option value="${c[0]}">📍 ${c[0]}</option>`).join(''); sel.addEventListener('change', () => { if (S.real) { setReal(true, { city: sel.value, keepDT: true }); toast(`📍 改成從${sel.value}看`); } }); }
+  document.querySelectorAll('#sky-seg button').forEach(b => b.addEventListener('click', () => {
+    const on = b.dataset.sky === 'real';
+    if (on === !!S.real) return;
+    stopPlay();
+    if (on) { if (setReal(true)) toast(`🔭 真實天空：${S.real.city}「現在」的月亮（天文公式計算）`); }
+    else { setReal(false); S.D = 8; S.T = 18; onStateChange(); toast('🧪 理想模型：地軸和月球軌道都不傾斜，方便理解'); }
+  }));
+  const nowBtn = document.getElementById('btn-now');
+  if (nowBtn) nowBtn.addEventListener('click', () => { stopPlay(); setReal(true); toast('📍 已跳到「現在」'); });
+}
+
 function explain(eDeg, mh, sh) {
   const J = S.level === 'j';
   let s;
@@ -960,7 +1243,7 @@ function loop(now) {
     else if (S.play === 'sync') { let T = (S.T >= 24 ? 0 : S.T) + dt * 3.6 * S.speed; if (T >= 24) { T -= 24; S.D = S.D % 30 + 1; } setTime(T); }
     else if (S.play === 'day') { acc += dt * S.speed; if (acc >= 0.85) { acc = 0; setDay(S.D + 1); } }
   }
-  if (S.opt.rays) { rayMat.dashOffset -= dt * 2.2; S.dirty = S.dirty || S.views.main === 'space'; }
+  if (S.opt.rays) { rayMat.dashOffset -= dt * 2.2; rayMatBig.dashOffset -= dt * 14; S.dirty = S.dirty || S.views.main === 'space'; }
   if (controls) { controls.enabled = !S.flying && !document.body.classList.contains('quiz-no-rotate'); controls.update(); }
   if (S.followMoon && cur && !S.flying) {
     const half = S.look.fov / 2, tgtAz = cur.mh.alt > -3 ? cur.mh.az : S.look.az;
@@ -980,7 +1263,7 @@ setLevel(S.level);
 renderTools(); attachControls();
 onStateChange();
 requestAnimationFrame(loop);
-window.__moon = { S, setDay, setTime, setMain, flyIn, flyOut, computeNow, riseSet, horiz, basis, moonDir, swapMain, setLevel, cur: () => cur,
+window.__moon = { S, setReal, setTrueScale, setTrueMoonSize, toggleGyro, stopGyro, deviceLook, drawTimeMap, realAt, setDay, setTime, setMain, flyIn, flyOut, computeNow, riseSet, horiz, basis, moonDir, swapMain, setLevel, cur: () => cur,
   setQuizState, phaseOf, elong, lunarName, fmtT, dir8, toast, play: m => { const b = document.querySelector(`.play[data-play="${m}"]`); if (b && S.play !== m) { b.disabled = false; b.click(); } }, stopPlay,
   onChange: f => changeHooks.push(f), setSpaceCam, ready: () => loaded };
 window.dispatchEvent(new Event('moon-ready'));
