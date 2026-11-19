@@ -6,7 +6,9 @@
 <title>日地月 3D 實驗室 v12｜飛進小人的眼睛</title>
 <meta name="description" content="用真實 NASA 月球與地球，從太空、從台灣地面、從望遠鏡三個視角同時看月相、月亮東升西落與每天晚約 50 分鐘。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🌙%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/app.css?v=12.1">
+<link rel="stylesheet" href="css/app.css?v=12.2">
+<link rel="stylesheet" href="css/seatpick.css?v=12.2">
+<link rel="stylesheet" href="css/quiz.css?v=12.2">
 </head>
 <body class="lv-e">
 
@@ -19,6 +21,8 @@
     <span class="ver">v12</span>
   </div>
   <div class="top-actions">
+    <button type="button" class="tbtn quiz-go" id="btn-quiz" onclick="openQuizHome()">🏆 挑戰測驗</button>
+    <button type="button" class="tbtn" id="btn-teacher" onclick="openTeacherLogin()">👩‍🏫 教師</button>
     <div class="seg" id="level-seg" role="tablist" aria-label="程度">
       <button type="button" data-lv="e" class="on">國小</button>
       <button type="button" data-lv="j">國中</button>
@@ -48,6 +52,8 @@
     <div id="info-card"></div>
   </aside>
 </main>
+
+<section id="quiz-bar" aria-live="polite"></section>
 
 <footer id="dock">
   <div class="dock-row">
@@ -106,6 +112,7 @@
       <li><b>🔭 望遠鏡</b>：放大看真實月球表面，亮的那一邊就是陽光照來的方向。</li>
       <li>拉動下方的<b>農曆日期</b>（月亮繞地球）和<b>時間</b>（地球自轉），三個畫面會一起變。</li>
       <li>在太空畫面按 <b>🚀 飛進小人的眼睛</b>，鏡頭會從太空一路飛到台灣小人身上，再抬頭看天空！</li>
+      <li>探索夠了，按右上角 <b>🏆 挑戰測驗</b>：題目每次都不一樣，要動手操作、先預測再觀察！</li>
     </ol>
     <p class="note">📝 這是「理想模型」：為了好懂，地軸和月球軌道都畫成不傾斜，地球和月亮的距離也縮短了；天空中的月亮也畫得比真實大（約 12 倍），才看得清楚月相。月亮升起的方位、時間和真實天空會有一點差異。</p>
     <button type="button" class="big-ok" id="help-ok">我知道了，開始探索！</button>
@@ -114,8 +121,115 @@
 
 <div id="toast"></div>
 
+<!-- 🏆 挑戰首頁 -->
+<div id="quiz-home" class="overlay qz-ov">
+  <div class="qz-card">
+    <button type="button" class="qz-x" onclick="closeOverlay('quiz-home')" aria-label="關閉">✕</button>
+    <h2>🏆 日地月觀測挑戰</h2>
+    <p class="qz-lead">每次題目都會隨機出，要動手操作 3D 宇宙、先預測再觀察！</p>
+    <div class="login-form">
+      <div class="form-group full"><label for="login-code">🔑 挑戰代碼 <small>（自學請用 00000）</small></label>
+        <input id="login-code" inputmode="numeric" maxlength="5" autocomplete="off" value="00000"></div>
+      <div class="form-group"><label for="login-name">姓名</label><input id="login-name" autocomplete="off"></div>
+      <div class="form-group"><label for="login-seat">座號</label><input id="login-seat" autocomplete="off"></div>
+    </div>
+    <div id="qz-code-info" class="qz-code-info"></div>
+    <button type="button" id="start-btn" class="qz-start" onclick="startCloudGame()">🚀 開始挑戰</button>
+    <button type="button" class="qz-sub" onclick="openHomeBoard()">🏆 看排行榜</button>
+  </div>
+</div>
+
+<!-- 🏆 排行榜 -->
+<div id="home-board-modal" class="overlay qz-ov" style="display:none">
+  <div class="qz-card wide">
+    <button type="button" class="qz-x" onclick="closeHomeBoard()" aria-label="關閉">✕</button>
+    <h2>🏆 排行榜</h2>
+    <div class="qz-table-wrap"><table class="qz-table"><thead><tr><th>名次</th><th>座號</th><th>姓名</th><th>最高分</th><th>答對/錯</th><th>連擊</th><th>稱號</th><th>次數</th><th>達成時間</th></tr></thead>
+      <tbody id="modal-board-tbody"></tbody></table></div>
+  </div>
+</div>
+
+<!-- 🎉 挑戰結果 -->
+<div id="result-overlay" class="overlay qz-ov">
+  <div class="qz-card wide">
+    <div id="res-head"></div>
+    <div id="res-dims"></div>
+    <div id="res-tips"></div>
+    <div id="res-upload" class="qz-upload"></div>
+    <div class="qz-table-wrap"><table class="qz-table"><thead><tr><th>名次</th><th>座號</th><th>姓名</th><th>最高分</th><th>答對/錯</th><th>連擊</th><th>稱號</th><th>次數</th><th>達成時間</th></tr></thead>
+      <tbody id="result-board-tbody"></tbody></table></div>
+    <div class="qz-btns">
+      <button type="button" class="qz-start" onclick="retryChallenge()">🔁 再挑戰一次</button>
+      <button type="button" class="qz-sub" onclick="exitQuiz(true)">🌙 回到實驗室自由探索</button>
+    </div>
+  </div>
+</div>
+
+<!-- 👩‍🏫 教師登入 -->
+<div id="teacher-login-modal" class="overlay qz-ov">
+  <div class="qz-card">
+    <button type="button" class="qz-x" onclick="closeOverlay('teacher-login-modal')" aria-label="關閉">✕</button>
+    <h2>👩‍🏫 教師後台</h2>
+    <p class="qz-lead">請輸入阿集老師核發的「教師專屬通行碼」</p>
+    <input id="teacher-pass-input" class="qz-input" type="password" autocomplete="off" placeholder="教師專屬通行碼" onkeydown="if(event.key==='Enter')verifyTeacherStep1()">
+    <button type="button" class="qz-start" onclick="verifyTeacherStep1()">🔓 下一步</button>
+  </div>
+</div>
+
+<!-- 🗂 建立／維護代碼 -->
+<div id="teacher-room-modal" class="overlay qz-ov">
+  <div class="qz-card">
+    <button type="button" class="qz-x" onclick="closeOverlay('teacher-room-modal')" aria-label="關閉">✕</button>
+    <h2>🗂 挑戰代碼</h2>
+    <div id="teacher-quota-banner" class="qz-banner"></div>
+    <div class="qz-tabs"><button type="button" id="rm-tab-create" class="on" onclick="switchRoomMode('create')">✨ 建立新代碼</button><button type="button" id="rm-tab-maintain" onclick="switchRoomMode('maintain')">🛠️ 維護現有代碼</button></div>
+    <div id="rm-create">
+      <label class="qz-lbl">5 位數代碼</label><input id="create-code" class="qz-input" inputmode="numeric" maxlength="5">
+      <div id="create-suggest" class="qz-chips"></div>
+      <label class="qz-lbl">設定管理密碼（自己記得就好）</label><input id="create-pin" class="qz-input" type="password" autocomplete="new-password">
+      <button type="button" id="btn-create-room" class="qz-start" onclick="submitCreateRoom()">✨ 建立代碼並進入後台</button>
+    </div>
+    <div id="rm-maintain" style="display:none">
+      <label class="qz-lbl">5 位數代碼</label><input id="maintain-code" class="qz-input" inputmode="numeric" maxlength="5">
+      <label class="qz-lbl">管理密碼 <small>（自己建立的代碼可以不填）</small></label><input id="maintain-pin" class="qz-input" type="password" autocomplete="off">
+      <button type="button" class="qz-start" onclick="submitMaintainRoom()">🔓 驗證並進入後台</button>
+    </div>
+  </div>
+</div>
+
+<!-- ⚙️ 教師管理後台 -->
+<div id="admin-overlay" class="overlay qz-ov">
+  <div class="qz-card admin">
+    <button type="button" class="qz-x" onclick="closeOverlay('admin-overlay')" aria-label="關閉">✕</button>
+    <h2 id="admin-title">⚙️ 教師管理後台</h2>
+    <div class="qz-tabs">
+      <button type="button" data-atab="tasks" class="on" onclick="switchAdminTab('tasks')">⚙️ 出題設定</button>
+      <button type="button" data-atab="records" onclick="switchAdminTab('records')">📊 成績與診斷</button>
+      <button type="button" data-atab="diag" onclick="switchAdminTab('diag')">🩺 連線檢查</button>
+    </div>
+    <div id="admin-panel-tasks" class="admin-panel"></div>
+    <div id="admin-panel-records" class="admin-panel" style="display:none"></div>
+    <div id="admin-panel-diag" class="admin-panel" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ⚠️ 雲端連線受阻 2 步自我排除 -->
+<div id="conn-error-modal" class="overlay qz-ov">
+  <div class="qz-card warn">
+    <h2>⚠️ 雲端題庫連線受阻</h2>
+    <p class="qz-lead">（可能受網路或瀏覽器限制，請依下列 2 步排除）</p>
+    <div class="qz-steps">👉 <b>第 1 步</b>：重新整理網頁<br>👉 <b>第 2 步</b>：改用「無痕視窗」或點擊「新分頁開啟」</div>
+    <p id="conn-error-note" class="qz-err"></p>
+    <button type="button" class="qz-start" onclick="location.reload()">🔄 重新整理網頁</button>
+    <button type="button" class="qz-sub" onclick="openInNewFullTab()">🚀 改用新分頁開啟</button>
+    <button type="button" class="qz-sub" onclick="closeOverlay('conn-error-modal')">返回</button>
+  </div>
+</div>
+
 <script src="js/astronomy.browser.min.js" defer></script>
-<script type="module" src="js/app.js?v=12.1"></script>
+<script src="js/quiz.js?v=12.2" defer></script>
+<script src="js/seatpick.js?v=12.2" defer></script>
+<script type="module" src="js/app.js?v=12.2"></script>
 <noscript><div style="padding:30px;color:#fff;font-size:20px">請開啟瀏覽器的 JavaScript 才能使用。</div></noscript>
 </body>
 </html>

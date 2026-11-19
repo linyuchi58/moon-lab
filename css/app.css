@@ -257,3 +257,10 @@ input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 
 }
 .presets { justify-content: flex-start !important; }
 .presets > :first-child { margin-left: auto; }
+
+/* ---- 測驗相關 ---- */
+.ctl.locked { opacity: .45; }
+.ctl.locked input[type=range] { pointer-events: none; }
+body.quiz-info-hidden #info-card { visibility: hidden; }
+.lb.mark { font-size: 20px; color: #fff; background: rgba(236,72,153,.85); border-color: #fbcfe8; padding: 2px 12px; }
+.play:disabled, .pre:disabled, .step:disabled { opacity: .4; pointer-events: none; }
